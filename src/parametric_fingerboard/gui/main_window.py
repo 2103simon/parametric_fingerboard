@@ -13,11 +13,9 @@ from mpl_toolkits.mplot3d.art3d import Poly3DCollection
 
 from parametric_fingerboard.model import (
     FingerboardParameters,
-    PreparedFingerboard,
     SideParameters,
     build_fingerboard,
     _prepare_fingerboard,
-    derive_dimensions,
     export_stl,
 )
 
@@ -73,6 +71,9 @@ class FingerboardGUI:
 
         global_frame = ttk.LabelFrame(controls, text="Global Parameters", padding=8)
         global_frame.pack(fill=tk.X, pady=(0, 10))
+        self._add_form_row(global_frame, "edge_depth", self.global_entries)
+        self._add_form_row(global_frame, "hand_span", self.global_entries)
+        self._add_form_row(global_frame, "edge_rounding", self.global_entries)
         self._add_form_row(global_frame, "board_width_scale", self.global_entries)
         self._add_form_row(global_frame, "x_margin", self.global_entries)
         self._add_form_row(global_frame, "y_margin", self.global_entries)
@@ -88,13 +89,13 @@ class FingerboardGUI:
         hands_frame = ttk.Frame(controls)
         hands_frame.pack(fill=tk.BOTH, expand=True)
 
-        left_frame = ttk.LabelFrame(hands_frame, text="Left Hand", padding=8)
-        left_frame.pack(fill=tk.X, pady=(0, 10))
-        self._add_side_rows(left_frame, self.left_entries)
-
         right_frame = ttk.LabelFrame(hands_frame, text="Right Hand", padding=8)
-        right_frame.pack(fill=tk.X)
+        right_frame.pack(fill=tk.X, pady=(0, 10))
         self._add_side_rows(right_frame, self.right_entries)
+
+        left_frame = ttk.LabelFrame(hands_frame, text="Left Hand", padding=8)
+        left_frame.pack(fill=tk.X)
+        self._add_side_rows(left_frame, self.left_entries)
 
         actions = ttk.Frame(controls)
         actions.pack(fill=tk.X, pady=(12, 0))
@@ -117,12 +118,9 @@ class FingerboardGUI:
         self._bind_auto_preview_events()
 
     def _add_side_rows(self, frame: ttk.LabelFrame, entry_map: dict[str, ttk.Entry]) -> None:
-        self._add_form_row(frame, "edge_depth", entry_map)
-        self._add_form_row(frame, "hand_span", entry_map)
         self._add_form_row(frame, "index_middle", entry_map)
         self._add_form_row(frame, "middle_ring", entry_map)
         self._add_form_row(frame, "ring_pinky", entry_map)
-        self._add_form_row(frame, "edge_rounding", entry_map)
 
     def _add_form_row(self, frame: ttk.LabelFrame | ttk.Frame, key: str, entry_map: dict[str, ttk.Entry]) -> None:
         row = ttk.Frame(frame)
@@ -155,6 +153,9 @@ class FingerboardGUI:
 
     def _set_defaults(self) -> None:
         defaults = {
+            "edge_depth": "20",
+            "hand_span": "68",
+            "edge_rounding": "2.5",
             "board_width_scale": "1.0",
             "x_margin": "8",
             "y_margin": "6",
@@ -171,12 +172,9 @@ class FingerboardGUI:
             self.global_entries[k].insert(0, v)
 
         side_defaults = {
-            "edge_depth": "20",
-            "hand_span": "68",
             "index_middle": "0",
             "middle_ring": "0",
             "ring_pinky": "0",
-            "edge_rounding": "2.5",
         }
         for values in (self.left_entries, self.right_entries):
             for k, v in side_defaults.items():
@@ -189,24 +187,21 @@ class FingerboardGUI:
 
     def _collect_params(self) -> FingerboardParameters:
         left = SideParameters(
-            edge_depth=self._float_value(self.left_entries, "edge_depth"),
-            hand_span=self._float_value(self.left_entries, "hand_span"),
             index_middle=self._float_value(self.left_entries, "index_middle"),
             middle_ring=self._float_value(self.left_entries, "middle_ring"),
             ring_pinky=self._float_value(self.left_entries, "ring_pinky"),
-            edge_rounding=self._float_value(self.left_entries, "edge_rounding"),
         )
 
         right = SideParameters(
-            edge_depth=self._float_value(self.right_entries, "edge_depth"),
-            hand_span=self._float_value(self.right_entries, "hand_span"),
             index_middle=self._float_value(self.right_entries, "index_middle"),
             middle_ring=self._float_value(self.right_entries, "middle_ring"),
             ring_pinky=self._float_value(self.right_entries, "ring_pinky"),
-            edge_rounding=self._float_value(self.right_entries, "edge_rounding"),
         )
 
         return FingerboardParameters(
+            edge_depth=self._float_value(self.global_entries, "edge_depth"),
+            hand_span=self._float_value(self.global_entries, "hand_span"),
+            edge_rounding=self._float_value(self.global_entries, "edge_rounding"),
             left=left,
             right=right,
             board_width_scale=self._float_value(self.global_entries, "board_width_scale"),
