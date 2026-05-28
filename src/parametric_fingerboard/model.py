@@ -42,6 +42,8 @@ class PreparedFingerboard:
     board_length: float
     board_width: float
     board_height: float
+    left_outer_reach: float
+    right_outer_reach: float
     left_finger_depths: list[float]
     right_finger_depths: list[float]
 
@@ -110,12 +112,23 @@ def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
 
     left_finger_depths = _finger_depths(params.edge_depth, params.left)
     right_finger_depths = _finger_depths(params.edge_depth, params.right)
-    max_side_depth = max(max(left_finger_depths), max(right_finger_depths))
+    left_max_depth = max(left_finger_depths)
+    right_max_depth = max(right_finger_depths)
+    left_required_reach = (
+        (params.center_bulk / 2.0)
+        + params.y_margin
+        + left_max_depth
+        + params.outer_wall_thickness
+    )
+    right_required_reach = (
+        (params.center_bulk / 2.0)
+        + params.y_margin
+        + right_max_depth
+        + params.outer_wall_thickness
+    )
     required_scaled_width = (
-        (2.0 * max_side_depth)
-        + (2.0 * params.y_margin)
-        + params.center_bulk
-        + (2.0 * params.outer_wall_thickness)
+        left_required_reach
+        + right_required_reach
     )
 
     # board_width is the pre-scale dimension. Grow it so that the final scaled width
@@ -123,17 +136,14 @@ def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
     required_unscaled_width = required_scaled_width / params.board_width_scale
     board_length = max(params.min_board_length, required_length)
     board_width = max(params.min_board_width, required_unscaled_width)
+    scaled_width = board_width * params.board_width_scale
+    extra_width = max(0.0, scaled_width - required_scaled_width)
+    left_outer_reach = left_required_reach + (extra_width / 2.0)
+    right_outer_reach = right_required_reach + (extra_width / 2.0)
 
     required_height = _max_pocket_height_side(params.hand_span)
     required_height += params.height_margin
     board_height = max(params.min_board_height, required_height)
-
-    scaled_width = board_width * params.board_width_scale
-    max_depth = (
-        (scaled_width - params.center_bulk) / 2.0
-        - params.y_margin
-        - params.outer_wall_thickness
-    )
 
     for side_name, side, finger_depths in (
         ("left", params.left, left_finger_depths),
@@ -143,10 +153,6 @@ def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
             if finger_depth < 8:
                 raise ValueError(
                     f"{side_name}.{finger_name} depth must be >= 8 mm"
-                )
-            if finger_depth > max_depth:
-                raise ValueError(
-                    f"{side_name}.{finger_name} depth must be <= {max_depth:.1f} mm"
                 )
 
     if params.cord_hole_diameter > params.center_bulk - 2.0:
@@ -159,6 +165,8 @@ def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
         board_length=board_length,
         board_width=board_width,
         board_height=board_height,
+        left_outer_reach=left_outer_reach,
+        right_outer_reach=right_outer_reach,
         left_finger_depths=left_finger_depths,
         right_finger_depths=right_finger_depths,
     )
@@ -184,13 +192,14 @@ def build_fingerboard(
     board_width = prepared.board_width
     board_height = prepared.board_height
     scaled_width = board_width * params.board_width_scale
+    body_center_y = (prepared.left_outer_reach - prepared.right_outer_reach) / 2.0
 
     body = cq.Workplane("XY").box(
         board_length,
         scaled_width,
         board_height,
         centered=(True, True, False),
-    )
+    ).translate((0.0, body_center_y, 0.0))
     body = body.edges("|Z").chamfer(5.0)
 
     # UI mapping: "Left Hand" controls left visual side and "Right Hand" right side.
@@ -222,13 +231,28 @@ def build_fingerboard(
 
     # Single rope hole at the center of the ridge.
     hole_z = board_height / 2.0
+    hole_radius = params.cord_hole_diameter / 2.0
     center_hole = (
         cq.Workplane("YZ")
         .center(0.0, hole_z)
-        .circle(params.cord_hole_diameter / 2.0)
+        .circle(hole_radius)
         .extrude((board_length / 2.0) + 2.0, both=True)
     )
     body = body.cut(center_hole)
+
+    positive_end_groove = (
+        cq.Workplane("XZ")
+        .center(board_length / 2.0, hole_z)
+        .circle(hole_radius)
+        .extrude((scaled_width / 2.0) + 2.0, both=True)
+    )
+    negative_end_groove = (
+        cq.Workplane("XZ")
+        .center(-(board_length / 2.0), hole_z)
+        .circle(hole_radius)
+        .extrude((scaled_width / 2.0) + 2.0, both=True)
+    )
+    body = body.cut(positive_end_groove).cut(negative_end_groove)
 
     # Side labels: L and R as negative imprints on outer side faces.
     text_depth = max(1.2, min(2.0, params.outer_wall_thickness * 0.35))

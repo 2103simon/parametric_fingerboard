@@ -239,9 +239,9 @@ class FingerboardGUI:
         )
 
         self.ax.clear()
-        poly = Poly3DCollection(triangles, linewidths=0.08)
+        poly = Poly3DCollection(triangles, linewidths=0.0, antialiased=False)
         poly.set_facecolor(face_colors)
-        poly.set_edgecolor((0.10, 0.10, 0.10, 0.45))
+        poly.set_edgecolor("none")
         self.ax.add_collection3d(poly)
 
         bounds = mesh.bounds
@@ -252,13 +252,12 @@ class FingerboardGUI:
         self.ax.set_ylim(mins[1], maxs[1])
         self.ax.set_zlim(mins[2], maxs[2])
         self.ax.set_box_aspect((maxs - mins).tolist())
-        self.ax.set_xlabel("X")
-        self.ax.set_ylabel("Y")
-        self.ax.set_zlabel("Z")
         self.ax.set_title("Preview")
+        self.ax.set_proj_type("ortho")
         self.ax.view_init(elev=22, azim=-52)
         self.ax.grid(False)
         self.ax.set_facecolor((0.96, 0.97, 0.99, 1.0))
+        self.ax.set_axis_off()
         self.canvas.draw_idle()
 
     def _render_error_preview(self, message: str) -> None:
