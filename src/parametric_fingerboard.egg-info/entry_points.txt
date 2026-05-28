@@ -1,0 +1,2 @@
+[console_scripts]
+fingerboard-gui = parametric_fingerboard.app:main

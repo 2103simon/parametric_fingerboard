@@ -1,0 +1,24 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Run Parametric Fingerboard App",
+      "type": "shell",
+      "command": "/home/smullercleve/.virtualenvs/parametric_fingerboard/bin/python",
+      "args": [
+        "-m",
+        "parametric_fingerboard.app"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": false
+      },
+      "problemMatcher": []
+    }
+  ]
+}

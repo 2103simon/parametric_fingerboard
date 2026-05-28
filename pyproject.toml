@@ -1,0 +1,24 @@
+[project]
+name = "parametric-fingerboard"
+version = "0.1.0"
+description = "Desktop GUI for generating parametric fingerboard STL models with independent left/right parameters"
+requires-python = ">=3.10"
+dependencies = [
+  "build123d>=0.9.1",
+  "cadquery>=2.5",
+  "matplotlib>=3.8",
+  "trimesh>=4.4",
+]
+
+[project.scripts]
+fingerboard-gui = "parametric_fingerboard.app:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = {"" = "src"}
+
+[tool.setuptools.packages.find]
+where = ["src"]

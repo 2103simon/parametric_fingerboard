@@ -1,0 +1,12 @@
+pyproject.toml
+src/parametric_fingerboard/__init__.py
+src/parametric_fingerboard/app.py
+src/parametric_fingerboard/model.py
+src/parametric_fingerboard.egg-info/PKG-INFO
+src/parametric_fingerboard.egg-info/SOURCES.txt
+src/parametric_fingerboard.egg-info/dependency_links.txt
+src/parametric_fingerboard.egg-info/entry_points.txt
+src/parametric_fingerboard.egg-info/requires.txt
+src/parametric_fingerboard.egg-info/top_level.txt
+src/parametric_fingerboard/gui/__init__.py
+src/parametric_fingerboard/gui/main_window.py

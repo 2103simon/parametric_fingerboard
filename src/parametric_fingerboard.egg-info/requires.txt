@@ -1,0 +1,4 @@
+build123d>=0.9.1
+cadquery>=2.5
+matplotlib>=3.8
+trimesh>=4.4
