@@ -158,7 +158,7 @@ class FingerboardGUI:
             "edge_rounding": "2.5",
             "board_width_scale": "1.0",
             "x_margin": "8",
-            "y_margin": "6",
+            "y_margin": "8",
             "outer_wall_thickness": "10",
             # "fixed_x_space": "10",
             "center_bulk": "10",
@@ -168,6 +168,8 @@ class FingerboardGUI:
             # "min_board_height": "34",
             "cord_hole_diameter": "8",
         }
+        self.min_x_margin = 5.0
+        self.min_y_margin = 5.0
         for k, v in defaults.items():
             self.global_entries[k].insert(0, v)
 
@@ -183,7 +185,23 @@ class FingerboardGUI:
         self._schedule_preview()
 
     def _float_value(self, entry_map: dict[str, ttk.Entry], key: str) -> float:
-        return float(entry_map[key].get().strip())
+        value = float(entry_map[key].get().strip())
+        # Enforce min_x_margin and min_y_margin if relevant
+        if key == "x_margin":
+            min_val = getattr(self, "min_x_margin", 0.0)
+            if value < min_val:
+                entry_map[key].delete(0, tk.END)
+                entry_map[key].insert(0, str(min_val))
+                raise ValueError(f"x_margin must be >= min_x_margin ({min_val})")
+            return value
+        if key == "y_margin":
+            min_val = getattr(self, "min_y_margin", 0.0)
+            if value < min_val:
+                entry_map[key].delete(0, tk.END)
+                entry_map[key].insert(0, str(min_val))
+                raise ValueError(f"y_margin must be >= min_y_margin ({min_val})")
+            return value
+        return value
 
     def _collect_params(self) -> FingerboardParameters:
         left = SideParameters(
