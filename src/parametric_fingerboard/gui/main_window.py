@@ -78,12 +78,12 @@ class FingerboardGUI:
         self._add_form_row(global_frame, "x_margin", self.global_entries)
         self._add_form_row(global_frame, "y_margin", self.global_entries)
         self._add_form_row(global_frame, "outer_wall_thickness", self.global_entries)
-        self._add_form_row(global_frame, "fixed_x_space", self.global_entries)
+        # self._add_form_row(global_frame, "fixed_x_space", self.global_entries)
         self._add_form_row(global_frame, "center_bulk", self.global_entries)
-        self._add_form_row(global_frame, "height_margin", self.global_entries)
-        self._add_form_row(global_frame, "min_board_length", self.global_entries)
-        self._add_form_row(global_frame, "min_board_width", self.global_entries)
-        self._add_form_row(global_frame, "min_board_height", self.global_entries)
+        self._add_form_row(global_frame, "board_height", self.global_entries)
+        # self._add_form_row(global_frame, "min_board_length", self.global_entries)
+        # self._add_form_row(global_frame, "min_board_width", self.global_entries)
+        # self._add_form_row(global_frame, "min_board_height", self.global_entries)
         self._add_form_row(global_frame, "cord_hole_diameter", self.global_entries)
 
         hands_frame = ttk.Frame(controls)
@@ -160,12 +160,12 @@ class FingerboardGUI:
             "x_margin": "8",
             "y_margin": "6",
             "outer_wall_thickness": "10",
-            "fixed_x_space": "10",
+            # "fixed_x_space": "10",
             "center_bulk": "10",
-            "height_margin": "10",
-            "min_board_length": "110",
-            "min_board_width": "46",
-            "min_board_height": "34",
+            "board_height": "30",
+            # "min_board_length": "110",
+            # "min_board_width": "46",
+            # "min_board_height": "34",
             "cord_hole_diameter": "8",
         }
         for k, v in defaults.items():
@@ -208,12 +208,12 @@ class FingerboardGUI:
             x_margin=self._float_value(self.global_entries, "x_margin"),
             y_margin=self._float_value(self.global_entries, "y_margin"),
             outer_wall_thickness=self._float_value(self.global_entries, "outer_wall_thickness"),
-            fixed_x_space=self._float_value(self.global_entries, "fixed_x_space"),
+            # fixed_x_space=self._float_value(self.global_entries, "fixed_x_space"),
             center_bulk=self._float_value(self.global_entries, "center_bulk"),
-            height_margin=self._float_value(self.global_entries, "height_margin"),
-            min_board_length=self._float_value(self.global_entries, "min_board_length"),
-            min_board_width=self._float_value(self.global_entries, "min_board_width"),
-            min_board_height=self._float_value(self.global_entries, "min_board_height"),
+            board_height=self._float_value(self.global_entries, "board_height"),
+            # min_board_length=self._float_value(self.global_entries, "min_board_length"),
+            # min_board_width=self._float_value(self.global_entries, "min_board_width"),
+            # min_board_height=self._float_value(self.global_entries, "min_board_height"),
             cord_hole_diameter=self._float_value(self.global_entries, "cord_hole_diameter"),
         )
 

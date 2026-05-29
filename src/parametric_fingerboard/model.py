@@ -27,13 +27,13 @@ class FingerboardParameters:
     wall_thickness: float = 3.0
     outer_wall_thickness: float = 10.0
     x_margin: float = 8.0
-    y_margin: float = 6.0
-    fixed_x_space: float = 10.0
+    y_margin: float = 8.0
+    # fixed_x_space: float = 10.0
     center_bulk: float = 10.0
-    height_margin: float = 10.0
-    min_board_length: float = 110.0
-    min_board_width: float = 46.0
-    min_board_height: float = 34.0
+    board_height: float = 30.0
+    # min_board_length: float = 110.0
+    # min_board_width: float = 46.0
+    # min_board_height: float = 34.0
     cord_hole_diameter: float = 8.0
 
 
@@ -102,14 +102,12 @@ def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
         raise ValueError("board_width_scale must be > 0")
     if params.edge_depth <= 8:
         raise ValueError("edge_depth must be > 8 mm")
-    if params.hand_span < 45:
-        raise ValueError("hand_span must be >= 45 mm")
     if params.edge_rounding < 0:
         raise ValueError("edge_rounding must be >= 0 mm")
 
     # Reserve outer_wall_thickness at both ends
     required_length = _side_span_x(params.hand_span)
-    required_length += (2.0 * params.x_margin) + (2.0 * params.outer_wall_thickness) + params.fixed_x_space
+    required_length += (2.0 * params.x_margin) + (2.0 * params.outer_wall_thickness) # + params.fixed_x_space
 
     left_finger_depths = _finger_depths(params.edge_depth, params.left)
     right_finger_depths = _finger_depths(params.edge_depth, params.right)
@@ -135,16 +133,15 @@ def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
     # board_width is the pre-scale dimension. Grow it so that the final scaled width
     # always fits the deepest stair values plus margins and center bulk.
     required_unscaled_width = required_scaled_width / params.board_width_scale
-    board_length = max(params.min_board_length, required_length)
-    board_width = max(params.min_board_width, required_unscaled_width)
+    board_length = required_length
+    board_width = required_unscaled_width
     scaled_width = board_width * params.board_width_scale
     extra_width = max(0.0, scaled_width - required_scaled_width)
     left_outer_reach = left_required_reach + (extra_width / 2.0)
     right_outer_reach = right_required_reach + (extra_width / 2.0)
 
-    required_height = _max_pocket_height_side(params.hand_span)
-    required_height += params.height_margin
-    board_height = max(params.min_board_height, required_height)
+    # Board height is fixed or controlled by min_board_height and board_height only
+    board_height = params.board_height
 
     for side_name, side, finger_depths in (
         ("left", params.left, left_finger_depths),
@@ -209,16 +206,11 @@ def build_fingerboard(
         (-1.0, params.right, prepared.right_finger_depths),
         (1.0, params.left, prepared.left_finger_depths),
     ):
-        # Compute slot centers so that the first and last slot are offset from both ends by outer_wall_thickness + x_margin
-        slot_width = params.hand_span / 3.0
+        # The fingerbox region is exactly hand_span wide, centered on the board
         n_slots = 4
-        left_edge = -0.5 * board_length + params.outer_wall_thickness + params.x_margin + 0.5 * slot_width
-        right_edge = 0.5 * board_length - params.outer_wall_thickness - params.x_margin - 0.5 * slot_width
-        if n_slots > 1:
-            slot_spacing = (right_edge - left_edge) / (n_slots - 1)
-        else:
-            slot_spacing = 0
-        centers_x = [left_edge + i * slot_spacing for i in range(n_slots)]
+        slot_width = params.hand_span / n_slots
+        left_edge = -0.5 * params.hand_span
+        centers_x = [left_edge + (i + 0.5) * slot_width for i in range(n_slots)]
 
         # Keep the center-facing pocket wall fixed and grow depth toward the outer wall.
         inner_wall_abs = (params.center_bulk / 2.0) + params.y_margin
