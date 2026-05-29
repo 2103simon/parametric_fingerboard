@@ -107,8 +107,9 @@ def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
     if params.edge_rounding < 0:
         raise ValueError("edge_rounding must be >= 0 mm")
 
+    # Reserve outer_wall_thickness at both ends
     required_length = _side_span_x(params.hand_span)
-    required_length += (2.0 * params.x_margin) + params.fixed_x_space
+    required_length += (2.0 * params.x_margin) + (2.0 * params.outer_wall_thickness) + params.fixed_x_space
 
     left_finger_depths = _finger_depths(params.edge_depth, params.left)
     right_finger_depths = _finger_depths(params.edge_depth, params.right)
@@ -208,8 +209,16 @@ def build_fingerboard(
         (-1.0, params.right, prepared.right_finger_depths),
         (1.0, params.left, prepared.left_finger_depths),
     ):
-        centers_x = _slot_centers_x(params.hand_span)
+        # Compute slot centers so that the first and last slot are offset from both ends by outer_wall_thickness + x_margin
         slot_width = params.hand_span / 3.0
+        n_slots = 4
+        left_edge = -0.5 * board_length + params.outer_wall_thickness + params.x_margin + 0.5 * slot_width
+        right_edge = 0.5 * board_length - params.outer_wall_thickness - params.x_margin - 0.5 * slot_width
+        if n_slots > 1:
+            slot_spacing = (right_edge - left_edge) / (n_slots - 1)
+        else:
+            slot_spacing = 0
+        centers_x = [left_edge + i * slot_spacing for i in range(n_slots)]
 
         # Keep the center-facing pocket wall fixed and grow depth toward the outer wall.
         inner_wall_abs = (params.center_bulk / 2.0) + params.y_margin
@@ -291,5 +300,5 @@ def export_stl(
         shape = build_fingerboard(params, prepared=prepared)
     target = Path(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    exporters.export(shape, str(target), tolerance=tolerance)
+    exporters.export(shape, str(target), tolerance=tolerance)  # File type can also be 3mf. TODO make export type selectable (as well as tolerances?) 
     return target
