@@ -107,22 +107,25 @@ def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
 
     # Reserve outer_wall_thickness at both ends
     required_length = _side_span_x(params.hand_span)
-    required_length += (2.0 * params.x_margin) + (2.0 * params.outer_wall_thickness) # + params.fixed_x_space
+    required_length += (2.0 * params.x_margin) + (2.0 * params.outer_wall_thickness)
 
     left_finger_depths = _finger_depths(params.edge_depth, params.left)
     right_finger_depths = _finger_depths(params.edge_depth, params.right)
     left_max_depth = max(left_finger_depths)
     right_max_depth = max(right_finger_depths)
+    # Both sides get y_margin and outer_wall_thickness
     left_required_reach = (
         (params.center_bulk / 2.0)
         + params.y_margin
         + left_max_depth
+        + params.y_margin
         + params.outer_wall_thickness
     )
     right_required_reach = (
         (params.center_bulk / 2.0)
         + params.y_margin
         + right_max_depth
+        + params.y_margin
         + params.outer_wall_thickness
     )
     required_scaled_width = (
