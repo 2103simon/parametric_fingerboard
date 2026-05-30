@@ -26,8 +26,8 @@ class FingerboardParameters:
     board_width_scale: float = 1.0
     wall_thickness: float = 3.0
     outer_wall_thickness: float = 10.0
-    x_margin: float = 8.0
-    y_margin: float = 8.0
+    width_margin: float = 8.0
+    height_margin: float = 8.0
     # fixed_x_space: float = 10.0
     center_bulk: float = 10.0
     board_height: float = 30.0
@@ -107,25 +107,25 @@ def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
 
     # Reserve outer_wall_thickness at both ends
     required_length = _side_span_x(params.hand_span)
-    required_length += (2.0 * params.x_margin) + (2.0 * params.outer_wall_thickness)
+    required_length += (2.0 * params.width_margin) + (2.0 * params.outer_wall_thickness)
 
     left_finger_depths = _finger_depths(params.edge_depth, params.left)
     right_finger_depths = _finger_depths(params.edge_depth, params.right)
     left_max_depth = max(left_finger_depths)
     right_max_depth = max(right_finger_depths)
-    # Both sides get y_margin and outer_wall_thickness
+    # Both sides get height_margin and outer_wall_thickness
     left_required_reach = (
         (params.center_bulk / 2.0)
-        + params.y_margin
+        + params.height_margin
         + left_max_depth
-        + params.y_margin
+        + params.height_margin
         + params.outer_wall_thickness
     )
     right_required_reach = (
         (params.center_bulk / 2.0)
-        + params.y_margin
+        + params.height_margin
         + right_max_depth
-        + params.y_margin
+        + params.height_margin
         + params.outer_wall_thickness
     )
     required_scaled_width = (
@@ -216,7 +216,7 @@ def build_fingerboard(
         centers_x = [left_edge + (i + 0.5) * slot_width for i in range(n_slots)]
 
         # Keep the center-facing pocket wall fixed and grow depth toward the outer wall.
-        inner_wall_abs = (params.center_bulk / 2.0) + params.y_margin
+        inner_wall_abs = (params.center_bulk / 2.0) + params.height_margin
         for cx, pocket_depth in zip(centers_x, finger_depths):
             y_center = side_sign * (inner_wall_abs + pocket_depth / 2.0)
             pocket_height = slot_width

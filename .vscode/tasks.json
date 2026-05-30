@@ -19,6 +19,25 @@
         "clear": false
       },
       "problemMatcher": []
+    },
+    {
+      "label": "Run Parametric Fingerboard App (home)",
+      "type": "shell",
+      "command": "/home/smuellercleve/.virtualenvs/fingerboard/bin/python",
+      "args": [
+        "-m",
+        "parametric_fingerboard.app"
+      ],
+      "group": {
+        "kind": "build",
+        "isDefault": true
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "clear": false
+      },
+      "problemMatcher": []
     }
   ]
 }
