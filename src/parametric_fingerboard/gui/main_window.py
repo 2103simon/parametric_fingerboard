@@ -75,8 +75,8 @@ class FingerboardGUI:
         self._add_form_row(global_frame, "hand_span", self.global_entries)
         self._add_form_row(global_frame, "edge_rounding", self.global_entries)
         self._add_form_row(global_frame, "board_width_scale", self.global_entries)
-        self._add_form_row(global_frame, "width_margin", self.global_entries)
-        self._add_form_row(global_frame, "height_margin", self.global_entries)
+        self._add_form_row(global_frame, "side_margin", self.global_entries)
+        self._add_form_row(global_frame, "top_margin", self.global_entries)
         self._add_form_row(global_frame, "outer_wall_thickness", self.global_entries)
         # self._add_form_row(global_frame, "fixed_x_space", self.global_entries)
         self._add_form_row(global_frame, "center_bulk", self.global_entries)
@@ -157,8 +157,8 @@ class FingerboardGUI:
             "hand_span": "68",
             "edge_rounding": "2.5",
             "board_width_scale": "1.0",
-            "width_margin": "8",
-            "height_margin": "8",
+            "side_margin": "8",
+            "top_margin": "8",
             "outer_wall_thickness": "10",
             # "fixed_x_space": "10",
             "center_bulk": "10",
@@ -168,8 +168,8 @@ class FingerboardGUI:
             # "min_board_height": "34",
             "cord_hole_diameter": "8",
         }
-        self.min_width_margin = 5.0
-        self.min_height_margin = 5.0
+        self.min_side_margin = 5.0
+        self.min_top_margin = 5.0
         for k, v in defaults.items():
             self.global_entries[k].insert(0, v)
 
@@ -186,20 +186,20 @@ class FingerboardGUI:
 
     def _float_value(self, entry_map: dict[str, ttk.Entry], key: str) -> float:
         value = float(entry_map[key].get().strip())
-        # Enforce min_width_margin and min_height_margin if relevant
-        if key == "width_margin":
-            min_val = getattr(self, "min_width_margin", 0.0)
+        # Enforce min_side_margin and min_top_margin if relevant
+        if key == "side_margin":
+            min_val = getattr(self, "min_side_margin", 0.0)
             if value < min_val:
                 entry_map[key].delete(0, tk.END)
                 entry_map[key].insert(0, str(min_val))
-                raise ValueError(f"width_margin must be >= min_width_margin ({min_val})")
+                raise ValueError(f"side_margin must be >= min_side_margin ({min_val})")
             return value
-        if key == "height_margin":
-            min_val = getattr(self, "min_height_margin", 0.0)
+        if key == "top_margin":
+            min_val = getattr(self, "min_top_margin", 0.0)
             if value < min_val:
                 entry_map[key].delete(0, tk.END)
                 entry_map[key].insert(0, str(min_val))
-                raise ValueError(f"height_margin must be >= min_height_margin ({min_val})")
+                raise ValueError(f"top_margin must be >= min_top_margin ({min_val})")
             return value
         return value
 
@@ -223,8 +223,8 @@ class FingerboardGUI:
             left=left,
             right=right,
             board_width_scale=self._float_value(self.global_entries, "board_width_scale"),
-            width_margin=self._float_value(self.global_entries, "width_margin"),
-            height_margin=self._float_value(self.global_entries, "height_margin"),
+            side_margin=self._float_value(self.global_entries, "side_margin"),
+            top_margin=self._float_value(self.global_entries, "top_margin"),
             outer_wall_thickness=self._float_value(self.global_entries, "outer_wall_thickness"),
             # fixed_x_space=self._float_value(self.global_entries, "fixed_x_space"),
             center_bulk=self._float_value(self.global_entries, "center_bulk"),
