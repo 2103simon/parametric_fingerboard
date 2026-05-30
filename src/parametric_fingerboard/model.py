@@ -20,7 +20,6 @@ class SideParameters:
 class FingerboardParameters:
     left: SideParameters
     right: SideParameters
-    edge_depth: float = 20.0
     hand_span: float = 68.0
     edge_rounding: float = 2.5
     board_width_scale: float = 1.0
@@ -84,12 +83,12 @@ def _side_span_x(hand_span: float) -> float:
     return hand_span
 
 
-def _max_pocket_height_side(hand_span: float) -> float:
-    return hand_span / 3.0
+# def _max_pocket_height_side(hand_span: float) -> float:
+#     return hand_span / 3.0
 
 
-def _finger_depths(edge_depth: float, side: SideParameters) -> list[float]:
-    base = edge_depth
+def _finger_depths(hand_span: float, side: SideParameters) -> list[float]:
+    base = hand_span / 2.0
     plateaus = _plateaus(side)
     max_plateau = max(plateaus)
     # Pinky is the deepest cut. Higher plateaus reduce the cut depth and leave
@@ -100,8 +99,6 @@ def _finger_depths(edge_depth: float, side: SideParameters) -> list[float]:
 def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
     if params.board_width_scale <= 0:
         raise ValueError("board_width_scale must be > 0")
-    if params.edge_depth <= 8:
-        raise ValueError("edge_depth must be > 8 mm")
     if params.edge_rounding < 0:
         raise ValueError("edge_rounding must be >= 0 mm")
 
@@ -109,8 +106,8 @@ def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
     required_length = _side_span_x(params.hand_span)
     required_length += (2.0 * params.side_margin) + (2.0 * params.outer_wall_thickness)
 
-    left_finger_depths = _finger_depths(params.edge_depth, params.left)
-    right_finger_depths = _finger_depths(params.edge_depth, params.right)
+    left_finger_depths = _finger_depths(params.hand_span, params.left)
+    right_finger_depths = _finger_depths(params.hand_span, params.right)
     left_max_depth = max(left_finger_depths)
     right_max_depth = max(right_finger_depths)
     # Both sides get top_margin and outer_wall_thickness

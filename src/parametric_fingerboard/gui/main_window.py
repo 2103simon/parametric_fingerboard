@@ -71,7 +71,6 @@ class FingerboardGUI:
 
         global_frame = ttk.LabelFrame(controls, text="Global Parameters", padding=8)
         global_frame.pack(fill=tk.X, pady=(0, 10))
-        self._add_form_row(global_frame, "edge_depth", self.global_entries)
         self._add_form_row(global_frame, "hand_span", self.global_entries)
         self._add_form_row(global_frame, "edge_rounding", self.global_entries)
         self._add_form_row(global_frame, "board_width_scale", self.global_entries)
@@ -153,7 +152,6 @@ class FingerboardGUI:
 
     def _set_defaults(self) -> None:
         defaults = {
-            "edge_depth": "20",
             "hand_span": "68",
             "edge_rounding": "2.5",
             "board_width_scale": "1.0",
@@ -217,7 +215,6 @@ class FingerboardGUI:
         )
 
         return FingerboardParameters(
-            edge_depth=self._float_value(self.global_entries, "edge_depth"),
             hand_span=self._float_value(self.global_entries, "hand_span"),
             edge_rounding=self._float_value(self.global_entries, "edge_rounding"),
             left=left,
