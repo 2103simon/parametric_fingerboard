@@ -142,7 +142,7 @@ class FingerboardGUI:
     def _schedule_preview(self, _event: tk.Event | None = None) -> None:
         if self._preview_after_id is not None:
             self.root.after_cancel(self._preview_after_id)
-        self._preview_after_id = self.root.after(220, self._run_scheduled_preview)
+        self._preview_after_id = self.root.after(800, self._run_scheduled_preview)
 
     def _run_scheduled_preview(self) -> None:
         self._preview_after_id = None
