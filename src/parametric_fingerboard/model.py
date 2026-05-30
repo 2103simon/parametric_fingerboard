@@ -1,3 +1,28 @@
+"""
+Fingerboard axis definitions (coordinate system):
+
+- Length (X axis):
+    The axis connecting the two sides with the engraved labels 'L' (left) and 'R' (right).
+    This is the longest axis of the board, and the board is created with length along X in the CadQuery model.
+    In the code: 'board_length'.
+
+- Width (Y axis):
+    The axis running perpendicular to the length, along the center hole (rope hole direction).
+    This is the axis from the front to the back of the board, and is called 'board_width' in the code.
+    The width is affected by hand_span and scaling parameters.
+
+- Height (Z axis):
+    The vertical axis, perpendicular to both length and width.
+    This is the thickness of the board, and is called 'board_height' in the code.
+    The height is the dimension you see from the tabletop up.
+
+Summary:
+    - Length: connects 'L' and 'R' labels (X)
+    - Width: along the center hole (Y)
+    - Height: vertical thickness (Z)
+
+All geometric calculations and slot placements in this file follow this convention.
+"""
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -22,9 +47,7 @@ class FingerboardParameters:
     right: SideParameters
     hand_span: float = 68.0
     edge_rounding: float = 2.5
-    board_width_scale: float = 1.0
     wall_thickness: float = 3.0
-    outer_wall_thickness: float = 10.0
     side_margin: float = 8.0
     top_margin: float = 8.0
     # fixed_x_space: float = 10.0
@@ -97,33 +120,27 @@ def _finger_depths(hand_span: float, side: SideParameters) -> list[float]:
 
 
 def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
-    if params.board_width_scale <= 0:
-        raise ValueError("board_width_scale must be > 0")
     if params.edge_rounding < 0:
         raise ValueError("edge_rounding must be >= 0 mm")
 
-    # Reserve outer_wall_thickness at both ends
+    # Reserve full side_margin on each side (total 2x)
     required_length = _side_span_x(params.hand_span)
-    required_length += (2.0 * params.side_margin) + (2.0 * params.outer_wall_thickness)
+    required_length += (2.0 * params.side_margin)
 
     left_finger_depths = _finger_depths(params.hand_span, params.left)
     right_finger_depths = _finger_depths(params.hand_span, params.right)
     left_max_depth = max(left_finger_depths)
     right_max_depth = max(right_finger_depths)
-    # Both sides get top_margin and outer_wall_thickness
+    # Both sides get full top_margin on each side (total 2x)
     left_required_reach = (
         (params.center_bulk / 2.0)
-        + params.top_margin
+        + (2.0 * params.top_margin)
         + left_max_depth
-        + params.top_margin
-        + params.outer_wall_thickness
     )
     right_required_reach = (
         (params.center_bulk / 2.0)
-        + params.top_margin
+        + (2.0 * params.top_margin)
         + right_max_depth
-        + params.top_margin
-        + params.outer_wall_thickness
     )
     required_scaled_width = (
         left_required_reach
@@ -132,13 +149,10 @@ def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
 
     # board_width is the pre-scale dimension. Grow it so that the final scaled width
     # always fits the deepest stair values plus margins and center bulk.
-    required_unscaled_width = required_scaled_width / params.board_width_scale
     board_length = required_length
-    board_width = required_unscaled_width
-    scaled_width = board_width * params.board_width_scale
-    extra_width = max(0.0, scaled_width - required_scaled_width)
-    left_outer_reach = left_required_reach + (extra_width / 2.0)
-    right_outer_reach = right_required_reach + (extra_width / 2.0)
+    board_width = required_scaled_width
+    left_outer_reach = left_required_reach
+    right_outer_reach = right_required_reach
 
     # Board height is fixed or controlled by min_board_height and board_height only
     board_height = params.board_height
@@ -189,12 +203,11 @@ def build_fingerboard(
     board_length = prepared.board_length
     board_width = prepared.board_width
     board_height = prepared.board_height
-    scaled_width = board_width * params.board_width_scale
     body_center_y = (prepared.left_outer_reach - prepared.right_outer_reach) / 2.0
 
     body = cq.Workplane("XY").box(
         board_length,
-        scaled_width,
+        board_width,
         board_height,
         centered=(True, True, False),
     ).translate((0.0, body_center_y, 0.0))
@@ -245,18 +258,18 @@ def build_fingerboard(
         cq.Workplane("XZ")
         .center(board_length / 2.0, hole_z)
         .circle(hole_radius)
-        .extrude((scaled_width / 2.0) + 2.0, both=True)
+        .extrude((board_width / 2.0) + 2.0, both=True)
     )
     negative_end_groove = (
         cq.Workplane("XZ")
         .center(-(board_length / 2.0), hole_z)
         .circle(hole_radius)
-        .extrude((scaled_width / 2.0) + 2.0, both=True)
+        .extrude((board_width / 2.0) + 2.0, both=True)
     )
     body = body.cut(positive_end_groove).cut(negative_end_groove)
 
     # Side labels: L and R as negative imprints on outer side faces.
-    text_depth = max(1.2, min(2.0, params.outer_wall_thickness * 0.35))
+    text_depth = 1.2  # Fixed value since outer_wall_thickness is removed
     text_size = max(16.0, min(board_height * 0.60, board_length * 0.22))
 
     side_text_1 = body.faces(">Y").workplane(centerOption="CenterOfBoundBox").text(

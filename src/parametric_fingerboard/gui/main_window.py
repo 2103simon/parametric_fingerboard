@@ -73,10 +73,8 @@ class FingerboardGUI:
         global_frame.pack(fill=tk.X, pady=(0, 10))
         self._add_form_row(global_frame, "hand_span", self.global_entries)
         self._add_form_row(global_frame, "edge_rounding", self.global_entries)
-        self._add_form_row(global_frame, "board_width_scale", self.global_entries)
         self._add_form_row(global_frame, "side_margin", self.global_entries)
         self._add_form_row(global_frame, "top_margin", self.global_entries)
-        self._add_form_row(global_frame, "outer_wall_thickness", self.global_entries)
         # self._add_form_row(global_frame, "fixed_x_space", self.global_entries)
         self._add_form_row(global_frame, "center_bulk", self.global_entries)
         self._add_form_row(global_frame, "board_height", self.global_entries)
@@ -154,10 +152,8 @@ class FingerboardGUI:
         defaults = {
             "hand_span": "68",
             "edge_rounding": "2.5",
-            "board_width_scale": "1.0",
             "side_margin": "8",
             "top_margin": "8",
-            "outer_wall_thickness": "10",
             # "fixed_x_space": "10",
             "center_bulk": "10",
             "board_height": "30",
@@ -219,10 +215,8 @@ class FingerboardGUI:
             edge_rounding=self._float_value(self.global_entries, "edge_rounding"),
             left=left,
             right=right,
-            board_width_scale=self._float_value(self.global_entries, "board_width_scale"),
             side_margin=self._float_value(self.global_entries, "side_margin"),
             top_margin=self._float_value(self.global_entries, "top_margin"),
-            outer_wall_thickness=self._float_value(self.global_entries, "outer_wall_thickness"),
             # fixed_x_space=self._float_value(self.global_entries, "fixed_x_space"),
             center_bulk=self._float_value(self.global_entries, "center_bulk"),
             board_height=self._float_value(self.global_entries, "board_height"),
