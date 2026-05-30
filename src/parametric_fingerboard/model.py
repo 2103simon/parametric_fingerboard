@@ -134,13 +134,13 @@ def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
     # Both sides get full top_margin on each side (total 2x)
     left_required_reach = (
         (params.center_bulk / 2.0)
-        + (2.0 * params.top_margin)
         + left_max_depth
+        + params.top_margin
     )
     right_required_reach = (
         (params.center_bulk / 2.0)
-        + (2.0 * params.top_margin)
         + right_max_depth
+        + params.top_margin
     )
     required_scaled_width = (
         left_required_reach
@@ -225,8 +225,8 @@ def build_fingerboard(
         left_edge = -0.5 * params.hand_span
         centers_x = [left_edge + (i + 0.5) * slot_width for i in range(n_slots)]
 
-        # Keep the center-facing pocket wall fixed and grow depth toward the outer wall.
-        inner_wall_abs = (params.center_bulk / 2.0) + params.top_margin
+        # Center-facing pocket wall: only center_bulk applies, not margin
+        inner_wall_abs = (params.center_bulk / 2.0)
         for cx, pocket_depth in zip(centers_x, finger_depths):
             y_center = side_sign * (inner_wall_abs + pocket_depth / 2.0)
             pocket_height = slot_width
