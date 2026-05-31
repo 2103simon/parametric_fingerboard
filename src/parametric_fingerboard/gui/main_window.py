@@ -31,6 +31,7 @@ class FingerboardGUI:
         self.global_entries: dict[str, ttk.Entry] = {}
         self.left_entries: dict[str, ttk.Entry] = {}
         self.right_entries: dict[str, ttk.Entry] = {}
+        self.advanced_entries: dict[str, ttk.Entry] = {}
         self._preview_after_id: str | None = None
 
         self.figure = Figure(figsize=(8, 6), dpi=100)
@@ -69,6 +70,7 @@ class FingerboardGUI:
         preview = ttk.Frame(shell)
         preview.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(12, 0))
 
+
         global_frame = ttk.LabelFrame(controls, text="Global Parameters", padding=8)
         global_frame.pack(fill=tk.X, pady=(0, 10))
         self._add_form_row(global_frame, "hand_span", self.global_entries)
@@ -83,6 +85,26 @@ class FingerboardGUI:
         # self._add_form_row(global_frame, "min_board_height", self.global_entries)
         self._add_form_row(global_frame, "cord_hole_diameter", self.global_entries)
 
+        # Advanced section (collapsible)
+        self.advanced_visible = tk.BooleanVar(value=False)
+        advanced_frame = ttk.LabelFrame(controls, text="Advanced", padding=8)
+        advanced_frame.pack(fill=tk.X, pady=(0, 10))
+        advanced_toggle = ttk.Checkbutton(
+            advanced_frame,
+            text="Show Advanced Settings",
+            variable=self.advanced_visible,
+            command=self._toggle_advanced_section,
+            style="Toolbutton"
+        )
+        advanced_toggle.pack(anchor="w")
+        self.advanced_section = ttk.Frame(advanced_frame)
+        self.advanced_section.pack(fill=tk.X, pady=(8, 0))
+        self._add_form_row(self.advanced_section, "bottom_layer_thickness", self.advanced_entries)
+        self._add_form_row(self.advanced_section, "z_chamfer", self.advanced_entries)
+        self._add_form_row(self.advanced_section, "top_bottom_chamfer", self.advanced_entries)
+        self._toggle_advanced_section()
+
+        # --- Move these back to _build_layout ---
         hands_frame = ttk.Frame(controls)
         hands_frame.pack(fill=tk.BOTH, expand=True)
 
@@ -112,6 +134,12 @@ class FingerboardGUI:
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
         self.canvas = canvas
 
+    def _toggle_advanced_section(self):
+        if self.advanced_visible.get():
+            self.advanced_section.pack(fill=tk.X, pady=(8, 0))
+        else:
+            self.advanced_section.pack_forget()
+
         self._bind_auto_preview_events()
 
     def _add_side_rows(self, frame: ttk.LabelFrame, entry_map: dict[str, ttk.Entry]) -> None:
@@ -132,6 +160,7 @@ class FingerboardGUI:
             *self.global_entries.values(),
             *self.left_entries.values(),
             *self.right_entries.values(),
+            *self.advanced_entries.values(),
         ]
         for entry in all_entries:
             entry.bind("<KeyRelease>", self._schedule_preview)
@@ -162,10 +191,17 @@ class FingerboardGUI:
             # "min_board_height": "34",
             "cord_hole_diameter": "8",
         }
+        advanced_defaults = {
+            "bottom_layer_thickness": "5.0",
+            "z_chamfer": "5.0",
+            "top_bottom_chamfer": "2.0",
+        }
         self.min_side_margin = 5.0
         self.min_top_margin = 5.0
         for k, v in defaults.items():
             self.global_entries[k].insert(0, v)
+        for k, v in advanced_defaults.items():
+            self.advanced_entries[k].insert(0, v)
 
         side_defaults = {
             "index_middle": "0",
@@ -220,6 +256,10 @@ class FingerboardGUI:
             # fixed_x_space=self._float_value(self.global_entries, "fixed_x_space"),
             center_bulk=self._float_value(self.global_entries, "center_bulk"),
             edge_depth=self._float_value(self.global_entries, "edge_depth"),
+            # Advanced
+            bottom_layer_thickness=self._float_value(self.advanced_entries, "bottom_layer_thickness"),
+            z_chamfer=self._float_value(self.advanced_entries, "z_chamfer"),
+            top_bottom_chamfer=self._float_value(self.advanced_entries, "top_bottom_chamfer"),
             # min_board_length=self._float_value(self.global_entries, "min_board_length"),
             # min_board_width=self._float_value(self.global_entries, "min_board_width"),
             # min_board_height=self._float_value(self.global_entries, "min_board_height"),

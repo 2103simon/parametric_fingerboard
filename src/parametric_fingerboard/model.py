@@ -53,13 +53,16 @@ class FingerboardParameters:
     # fixed_x_space: float = 10.0
     center_bulk: float = 10.0
     edge_depth: float = 20.0  # User-settable cutout height (was board_height minus bottom layer)
+    # Advanced parameters
+    bottom_layer_thickness: float = 5.0
+    z_chamfer: float = 5.0
+    top_bottom_chamfer: float = 2.0
     # min_board_length: float = 110.0
     # min_board_width: float = 46.0
     # min_board_height: float = 34.0
     cord_hole_diameter: float = 8.0
 
-# Fixed bottom layer height (not user-editable)
-BOTTOM_LAYER_HEIGHT = 5.0
+
 
 
 @dataclass(slots=True)
@@ -157,8 +160,8 @@ def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
     left_outer_reach = left_required_reach
     right_outer_reach = right_required_reach
 
-    # New logic: board height is fixed bottom layer + user edge_depth
-    board_height = BOTTOM_LAYER_HEIGHT + params.edge_depth
+    # New logic: board height is bottom_layer_thickness + user edge_depth
+    board_height = params.bottom_layer_thickness + params.edge_depth
 
     for side_name, side, finger_depths in (
         ("left", params.left, left_finger_depths),
@@ -214,12 +217,14 @@ def build_fingerboard(
         board_height,
         centered=(True, True, False),
     ).translate((0.0, body_center_y, 0.0))
-    # Apply 5mm chamfer to all vertical (|Z) edges (existing behavior)
-    body = body.edges("|Z").chamfer(5.0)
+    # Apply z_chamfer to all vertical (|Z) edges if nonzero
+    if params.z_chamfer > 0:
+        body = body.edges("|Z").chamfer(params.z_chamfer)
 
-    # Apply 2mm chamfer only to the outer perimeter edges of the top and bottom faces
-    body = body.faces(">Z").wires().toPending().edges().chamfer(2.0)
-    body = body.faces("<Z").wires().toPending().edges().chamfer(2.0)
+    # Apply top_bottom_chamfer only to the outer perimeter edges of the top and bottom faces if nonzero
+    if params.top_bottom_chamfer > 0:
+        body = body.faces(">Z").wires().toPending().edges().chamfer(params.top_bottom_chamfer)
+        body = body.faces("<Z").wires().toPending().edges().chamfer(params.top_bottom_chamfer)
 
     # UI mapping: "Left Hand" controls left visual side and "Right Hand" right side.
     # Finger slot order is index -> middle -> ring -> pinky for both sides.
@@ -242,7 +247,7 @@ def build_fingerboard(
             pocket_width = slot_width
             pocket_depth_val = pocket_depth
             pocket_height = params.edge_depth
-            z_center = BOTTOM_LAYER_HEIGHT + pocket_height / 2.0
+            z_center = params.bottom_layer_thickness + pocket_height / 2.0
 
             pocket = (
                 cq.Workplane("XY")
