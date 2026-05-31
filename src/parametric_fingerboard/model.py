@@ -211,7 +211,12 @@ def build_fingerboard(
         board_height,
         centered=(True, True, False),
     ).translate((0.0, body_center_y, 0.0))
+    # Apply 5mm chamfer to all vertical (|Z) edges (existing behavior)
     body = body.edges("|Z").chamfer(5.0)
+
+    # Apply 2mm chamfer only to the outer perimeter edges of the top and bottom faces
+    body = body.faces(">Z").wires().toPending().edges().chamfer(2.0)
+    body = body.faces("<Z").wires().toPending().edges().chamfer(2.0)
 
     # UI mapping: "Left Hand" controls left visual side and "Right Hand" right side.
     # Finger slot order is index -> middle -> ring -> pinky for both sides.
