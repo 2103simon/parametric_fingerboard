@@ -77,7 +77,7 @@ class FingerboardGUI:
         self._add_form_row(global_frame, "top_margin", self.global_entries)
         # self._add_form_row(global_frame, "fixed_x_space", self.global_entries)
         self._add_form_row(global_frame, "center_bulk", self.global_entries)
-        self._add_form_row(global_frame, "board_height", self.global_entries)
+        self._add_form_row(global_frame, "edge_depth", self.global_entries)
         # self._add_form_row(global_frame, "min_board_length", self.global_entries)
         # self._add_form_row(global_frame, "min_board_width", self.global_entries)
         # self._add_form_row(global_frame, "min_board_height", self.global_entries)
@@ -156,7 +156,7 @@ class FingerboardGUI:
             "top_margin": "8",
             # "fixed_x_space": "10",
             "center_bulk": "10",
-            "board_height": "30",
+            "edge_depth": "20",
             # "min_board_length": "110",
             # "min_board_width": "46",
             # "min_board_height": "34",
@@ -219,7 +219,7 @@ class FingerboardGUI:
             top_margin=self._float_value(self.global_entries, "top_margin"),
             # fixed_x_space=self._float_value(self.global_entries, "fixed_x_space"),
             center_bulk=self._float_value(self.global_entries, "center_bulk"),
-            board_height=self._float_value(self.global_entries, "board_height"),
+            edge_depth=self._float_value(self.global_entries, "edge_depth"),
             # min_board_length=self._float_value(self.global_entries, "min_board_length"),
             # min_board_width=self._float_value(self.global_entries, "min_board_width"),
             # min_board_height=self._float_value(self.global_entries, "min_board_height"),

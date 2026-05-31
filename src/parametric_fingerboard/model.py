@@ -52,11 +52,14 @@ class FingerboardParameters:
     top_margin: float = 8.0
     # fixed_x_space: float = 10.0
     center_bulk: float = 10.0
-    board_height: float = 30.0
+    edge_depth: float = 20.0  # User-settable cutout height (was board_height minus bottom layer)
     # min_board_length: float = 110.0
     # min_board_width: float = 46.0
     # min_board_height: float = 34.0
     cord_hole_diameter: float = 8.0
+
+# Fixed bottom layer height (not user-editable)
+BOTTOM_LAYER_HEIGHT = 5.0
 
 
 @dataclass(slots=True)
@@ -154,8 +157,8 @@ def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
     left_outer_reach = left_required_reach
     right_outer_reach = right_required_reach
 
-    # Board height is fixed or controlled by min_board_height and board_height only
-    board_height = params.board_height
+    # New logic: board height is fixed bottom layer + user edge_depth
+    board_height = BOTTOM_LAYER_HEIGHT + params.edge_depth
 
     for side_name, side, finger_depths in (
         ("left", params.left, left_finger_depths),
@@ -232,15 +235,19 @@ def build_fingerboard(
 
         # Center-facing pocket wall: only center_bulk applies, not margin
         inner_wall_abs = (params.center_bulk / 2.0)
+
+
         for cx, pocket_depth in zip(centers_x, finger_depths):
             y_center = side_sign * (inner_wall_abs + pocket_depth / 2.0)
-            pocket_height = slot_width
-            z_center = board_height - (pocket_height / 2.0)
+            pocket_width = slot_width
+            pocket_depth_val = pocket_depth
+            pocket_height = params.edge_depth
+            z_center = BOTTOM_LAYER_HEIGHT + pocket_height / 2.0
 
             pocket = (
                 cq.Workplane("XY")
                 .center(cx, y_center)
-                .box(slot_width, pocket_depth, pocket_height, centered=(True, True, True))
+                .box(pocket_width, pocket_depth_val, pocket_height, centered=(True, True, True))
                 .translate((0.0, 0.0, z_center))
             )
             body = body.cut(pocket)
