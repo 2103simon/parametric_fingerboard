@@ -114,6 +114,7 @@ class FingerboardGUI(QMainWindow):
         preview_widget = QWidget()
         preview_layout = QVBoxLayout(preview_widget)
         self.gl_view = gl.GLViewWidget()
+        self.gl_view.setBackgroundColor('w')
         self.gl_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         preview_layout.addWidget(self.gl_view)
         main_layout.addWidget(preview_widget, 1)
@@ -231,7 +232,8 @@ class FingerboardGUI(QMainWindow):
         light_dir /= np.linalg.norm(light_dir)
         brightness = np.clip(normals @ light_dir, 0.0, 1.0)
         brightness = 0.22 + 0.78 * brightness
-        base_color = np.array([0.27, 0.57, 0.90])
+        # Set model color to medium gray
+        base_color = np.array([0.5, 0.5, 0.5])
         face_colors = np.column_stack([
             np.clip(base_color[0] * brightness, 0.0, 1.0),
             np.clip(base_color[1] * brightness, 0.0, 1.0),

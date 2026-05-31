@@ -34,11 +34,26 @@ python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
 ```
-If `requirements.txt` does not exist, install dependencies manually:
+
+The main dependencies are listed in `requirements.txt`:
+
+* PyQt6
+* pyqtgraph
+* trimesh
+* numpy
+
+If you need to install them manually:
 ```bash
-pip install pyinstaller
-# Add any other dependencies your project needs
+pip install PyQt6 pyqtgraph trimesh numpy pyinstaller
 ```
+---
+
+## About Length and Width in the App
+
+In this application, the terms **length** and **width** are defined by how the fingerboard is used:
+
+- **Length**: The direction in which the fingerboard is used, i.e., the axis along which the fingerboxes (where your fingers sit) are aligned and point outward. This is the direction you would pull on during use.
+- **Width**: The span across the fingerboard, determined by your hand width (distance from index to pinky). The width of the object is directly related to your hand span.
 
 ### 3. Generate the Standalone Executable with PyInstaller
 Run the following command from the project root:
