@@ -229,16 +229,45 @@ def build_fingerboard(
             dist_y1 = abs((board_width / 2.0) - abs(y_center + pocket_depth / 2.0))
             dist_y2 = abs((board_width / 2.0) - abs(y_center - pocket_depth / 2.0))
             min_dist = min(min_dist, dist_x1, dist_x2, dist_y1, dist_y2)
-    margin = min_dist / 10.0
+    margin = min_dist / 6.0
     max_z_chamfer = max(0.0, min_dist - margin)
     warning = None
     z_chamfer = params.z_chamfer
+    z_chamfer_clamped = False
     if z_chamfer > max_z_chamfer:
         z_chamfer = max_z_chamfer
         warning = (
             f"z_chamfer too large and would cut into the fingerbox. "
             f"Clamped to {max_z_chamfer:.2f} mm (margin {margin:.2f} mm)."
         )
+        z_chamfer_clamped = True
+
+    # --- Calculate max safe top/bottom chamfer based on margin to fingerbox ---
+    # The chamfer must not bring the edge closer to the fingerbox than the minimum of top_margin or side_margin, minus a tolerance.
+    min_margin = min(params.top_margin, params.side_margin)
+    tb_tolerance = min_margin / 6.0
+    max_tb_chamfer = max(0.0, min_margin - tb_tolerance)
+    tb_chamfer = params.top_bottom_chamfer
+    tb_chamfer_clamped = False
+    tb_warning = None
+    # Clamp to [0, max_tb_chamfer]
+    if tb_chamfer < 0:
+        tb_chamfer = 0.0
+        tb_chamfer_clamped = True
+        tb_warning = (
+            f"top/bottom chamfer cannot be negative. Clamped to 0.00 mm.")
+    elif tb_chamfer > max_tb_chamfer:
+        tb_chamfer = max_tb_chamfer
+        tb_chamfer_clamped = True
+        tb_warning = (
+            f"top/bottom chamfer too large and would cut into the fingerbox. "
+            f"Clamped to {max_tb_chamfer:.2f} mm (tolerance {tb_tolerance:.2f} mm)."
+        )
+    if tb_chamfer_clamped:
+        if warning:
+            warning += " " + tb_warning
+        else:
+            warning = tb_warning
 
     body = cq.Workplane("XY").box(
         board_length,
@@ -251,9 +280,9 @@ def build_fingerboard(
         body = body.edges("|Z").chamfer(z_chamfer)
 
     # Apply top_bottom_chamfer only to the outer perimeter edges of the top and bottom faces if nonzero
-    if params.top_bottom_chamfer > 0:
-        body = body.faces(">Z").wires().toPending().edges().chamfer(params.top_bottom_chamfer)
-        body = body.faces("<Z").wires().toPending().edges().chamfer(params.top_bottom_chamfer)
+    if tb_chamfer > 0:
+        body = body.faces(">Z").wires().toPending().edges().chamfer(tb_chamfer)
+        body = body.faces("<Z").wires().toPending().edges().chamfer(tb_chamfer)
 
     # UI mapping: "Left Hand" controls left visual side and "Right Hand" right side.
     # Finger slot order is index -> middle -> ring -> pinky for both sides.

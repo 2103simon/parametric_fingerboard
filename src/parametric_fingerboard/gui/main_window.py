@@ -345,12 +345,20 @@ class FingerboardGUI:
             )
             if warning:
                 msg += f" | {warning}"
-                # Update z_chamfer entry to the clamped value
                 import re
-                m = re.search(r"Clamped to ([0-9.]+) mm", warning)
-                if m:
-                    clamped_val = m.group(1)
+                # Update z_chamfer entry if clamped
+                z_match = re.search(r"z_chamfer[^\n]*Clamped to ([0-9.]+) mm", warning)
+                if z_match:
+                    clamped_val = z_match.group(1)
                     entry = self.advanced_entries.get("z_chamfer")
+                    if entry:
+                        entry.delete(0, tk.END)
+                        entry.insert(0, clamped_val)
+                # Update top_bottom_chamfer entry if clamped
+                tb_match = re.search(r"top/bottom chamfer[^\n]*Clamped to ([0-9.]+) mm", warning)
+                if tb_match:
+                    clamped_val = tb_match.group(1)
+                    entry = self.advanced_entries.get("top_bottom_chamfer")
                     if entry:
                         entry.delete(0, tk.END)
                         entry.insert(0, clamped_val)
