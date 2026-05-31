@@ -10,8 +10,12 @@ A user-friendly, standalone application for climbers to design and interact with
 - No installation or setup required for end-users (standalone executable)
 - Built with Python for cross-platform compatibility
 
+
 ## Quick Start (for End-Users)
-After downloading the standalone executable (see below for how to generate it), simply double-click the file to launch the app. No Python or additional software required.
+
+You do not need to download or install the entire project. Simply download the precompiled standalone executable for your operating system (Windows, Linux, or macOS) from the `dist/` folder or the project’s release page. Double-click the file to launch the app—no Python or additional software required.
+
+**Note:** If you do not see an executable for your operating system, it may not have been published yet. Please check back later or contact the author.
 
 ---
 
