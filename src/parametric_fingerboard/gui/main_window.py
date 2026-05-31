@@ -2,18 +2,18 @@
 
 
 """
-PyQt5 GUI for the Parametric Fingerboard Builder application.
-Implements the main window, parameter entry forms, preview rendering, and STL export functionality using PyQt5 and pyqtgraph.opengl.
+PyQt6 GUI for the Parametric Fingerboard Builder application.
+Implements the main window, parameter entry forms, preview rendering, and STL export functionality using PyQt6 and pyqtgraph.opengl.
 """
 
 import tempfile
 from pathlib import Path
 import numpy as np
 import trimesh
-from PyQt5.QtWidgets import (
+from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QLabel, QPushButton, QFileDialog, QMessageBox, QGroupBox, QScrollArea, QSizePolicy
 )
-from PyQt5.QtCore import Qt, QTimer
+from PyQt6.QtCore import Qt, QTimer
 import pyqtgraph.opengl as gl
 from pyqtgraph.Qt import QtGui
 
@@ -114,7 +114,7 @@ class FingerboardGUI(QMainWindow):
         preview_widget = QWidget()
         preview_layout = QVBoxLayout(preview_widget)
         self.gl_view = gl.GLViewWidget()
-        self.gl_view.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.gl_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         preview_layout.addWidget(self.gl_view)
         main_layout.addWidget(preview_widget, 1)
 
@@ -263,7 +263,8 @@ class FingerboardGUI(QMainWindow):
             params = self._collect_params()
             prepared = _prepare_fingerboard(params)
             shape, warning = build_fingerboard(params, prepared=prepared)
-            board_length, board_width, board_height = (
+            # Swap length and width for output
+            board_width, board_length, board_height = (
                 prepared.board_length,
                 prepared.board_width,
                 prepared.board_height,
@@ -306,7 +307,8 @@ class FingerboardGUI(QMainWindow):
         try:
             params = self._collect_params()
             prepared = _prepare_fingerboard(params)
-            board_length, board_width, board_height = (
+            # Swap length and width for output
+            board_width, board_length, board_height = (
                 prepared.board_length,
                 prepared.board_width,
                 prepared.board_height,
@@ -329,4 +331,4 @@ def run_app():
     app = QApplication([])
     window = FingerboardGUI()
     window.show()
-    app.exec_()
+    app.exec()
