@@ -329,7 +329,7 @@ class FingerboardGUI:
         try:
             params = self._collect_params()
             prepared = _prepare_fingerboard(params)
-            shape = build_fingerboard(params, prepared=prepared)
+            shape, warning = build_fingerboard(params, prepared=prepared)
             board_length, board_width, board_height = (
                 prepared.board_length,
                 prepared.board_width,
@@ -339,10 +339,26 @@ class FingerboardGUI:
                 tmp_path = Path(tmp.name)
             export_stl(params, tmp_path, shape=shape, prepared=prepared)
             self._render_preview(tmp_path)
-            self.status_var.set(
+            msg = (
                 "Preview updated | "
                 f"L={board_length:.1f} mm, W={board_width:.1f} mm, H={board_height:.1f} mm"
             )
+            if warning:
+                msg += f" | {warning}"
+                # Update z_chamfer entry to the clamped value
+                import re
+                m = re.search(r"Clamped to ([0-9.]+) mm", warning)
+                if m:
+                    clamped_val = m.group(1)
+                    entry = self.advanced_entries.get("z_chamfer")
+                    if entry:
+                        entry.delete(0, tk.END)
+                        entry.insert(0, clamped_val)
+                self.status_var.set(msg)
+                if show_dialog:
+                    messagebox.showwarning("Chamfer Clamped", warning)
+            else:
+                self.status_var.set(msg)
         except Exception as exc:
             self.status_var.set(f"Preview failed: {exc}")
             self._render_error_preview(str(exc))

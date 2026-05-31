@@ -202,7 +202,7 @@ def _validate(params: FingerboardParameters) -> None:
 def build_fingerboard(
     params: FingerboardParameters,
     prepared: PreparedFingerboard | None = None,
-) -> cq.Workplane:
+) -> tuple[cq.Workplane, str | None]:
     if prepared is None:
         prepared = _prepare_fingerboard(params)
 
@@ -211,6 +211,35 @@ def build_fingerboard(
     board_height = prepared.board_height
     body_center_y = (prepared.left_outer_reach - prepared.right_outer_reach) / 2.0
 
+    # --- Calculate max safe z chamfer ---
+    min_dist = float('inf')
+    n_slots = 4
+    slot_width = params.hand_span / n_slots
+    left_edge = -0.5 * params.hand_span
+    for side_sign, side, finger_depths in (
+        (-1.0, params.right, prepared.right_finger_depths),
+        (1.0, params.left, prepared.left_finger_depths),
+    ):
+        centers_x = [left_edge + (i + 0.5) * slot_width for i in range(n_slots)]
+        inner_wall_abs = (params.center_bulk / 2.0)
+        for cx, pocket_depth in zip(centers_x, finger_depths):
+            y_center = side_sign * (inner_wall_abs + pocket_depth / 2.0)
+            dist_x1 = abs((board_length / 2.0) - abs(cx + slot_width / 2.0))
+            dist_x2 = abs((board_length / 2.0) - abs(cx - slot_width / 2.0))
+            dist_y1 = abs((board_width / 2.0) - abs(y_center + pocket_depth / 2.0))
+            dist_y2 = abs((board_width / 2.0) - abs(y_center - pocket_depth / 2.0))
+            min_dist = min(min_dist, dist_x1, dist_x2, dist_y1, dist_y2)
+    margin = min_dist / 10.0
+    max_z_chamfer = max(0.0, min_dist - margin)
+    warning = None
+    z_chamfer = params.z_chamfer
+    if z_chamfer > max_z_chamfer:
+        z_chamfer = max_z_chamfer
+        warning = (
+            f"z_chamfer too large and would cut into the fingerbox. "
+            f"Clamped to {max_z_chamfer:.2f} mm (margin {margin:.2f} mm)."
+        )
+
     body = cq.Workplane("XY").box(
         board_length,
         board_width,
@@ -218,8 +247,8 @@ def build_fingerboard(
         centered=(True, True, False),
     ).translate((0.0, body_center_y, 0.0))
     # Apply z_chamfer to all vertical (|Z) edges if nonzero
-    if params.z_chamfer > 0:
-        body = body.edges("|Z").chamfer(params.z_chamfer)
+    if z_chamfer > 0:
+        body = body.edges("|Z").chamfer(z_chamfer)
 
     # Apply top_bottom_chamfer only to the outer perimeter edges of the top and bottom faces if nonzero
     if params.top_bottom_chamfer > 0:
@@ -308,7 +337,7 @@ def build_fingerboard(
 
     body = body.cut(side_text_1).cut(side_text_2)
 
-    return body
+    return body, warning
 
 
 def export_stl(
