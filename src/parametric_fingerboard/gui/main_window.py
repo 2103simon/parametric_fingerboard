@@ -8,7 +8,7 @@ Implements the main window, parameter entry forms, preview rendering, and STL ex
 
 import tempfile
 from pathlib import Path
-from typing import cast
+from typing import cast, Literal
 import numpy as np
 import trimesh
 from PyQt6.QtWidgets import (
@@ -46,6 +46,7 @@ class FingerboardGUI(QMainWindow):
         self.warning_label.setMinimumWidth(0)
         self.warning_label.setStyleSheet("color: #8a1f1f; background: #fbeaea; padding: 4px; border-radius: 3px;")
         self.warning_label.hide()
+        self._last_edited_global_key: str | None = None
         self.global_entries = {}
         self.left_entries = {}
         self.right_entries = {}
@@ -178,7 +179,19 @@ class FingerboardGUI(QMainWindow):
         # Connect signals for all QLineEdit widgets
         for entry in list(self.global_entries.values()) + list(self.left_entries.values()) + list(self.right_entries.values()) + list(self.advanced_entries.values()):
             entry.textChanged.connect(self._schedule_preview)
+        for key, entry in self.global_entries.items():
+            entry.textEdited.connect(lambda _text, k=key: self._mark_last_edited_global_key(k))
         self._schedule_preview()
+
+    def _mark_last_edited_global_key(self, key: str) -> None:
+        self._last_edited_global_key = key
+
+    def _bulk_cord_adjustment_preference(self) -> Literal["center_bulk", "cord_hole_diameter", "auto"]:
+        if self._last_edited_global_key == "center_bulk":
+            return "center_bulk"
+        if self._last_edited_global_key == "cord_hole_diameter":
+            return "cord_hole_diameter"
+        return "auto"
 
     def _set_warning_text(self, text: str = "") -> None:
         if text.strip():
@@ -187,6 +200,36 @@ class FingerboardGUI(QMainWindow):
         else:
             self.warning_label.clear()
             self.warning_label.hide()
+
+    def _apply_clamped_values_from_warning(self, warning: str) -> None:
+        def _set_if_changed(entry: QLineEdit | None, new_value: str) -> None:
+            if entry is None:
+                return
+            if entry.text().strip() == new_value:
+                return
+            prev = entry.blockSignals(True)
+            try:
+                entry.setText(new_value)
+            finally:
+                entry.blockSignals(prev)
+
+        for line in warning.splitlines():
+            if line.startswith("side_chamfer "):
+                match = line.rsplit("Clamped to ", 1)
+                if len(match) == 2:
+                    _set_if_changed(self.advanced_entries.get("side_chamfer"), match[1].split(" mm", 1)[0])
+            elif line.startswith("top/bottom chamfer "):
+                match = line.rsplit("Clamped to ", 1)
+                if len(match) == 2:
+                    _set_if_changed(self.advanced_entries.get("top_bottom_chamfer"), match[1].split(" mm", 1)[0])
+            elif line.startswith("center_bulk "):
+                match = line.rsplit("Clamped to ", 1)
+                if len(match) == 2:
+                    _set_if_changed(self.global_entries.get("center_bulk"), match[1].split(" mm", 1)[0])
+            elif line.startswith("cord_hole_diameter "):
+                match = line.rsplit("Clamped to ", 1)
+                if len(match) == 2:
+                    _set_if_changed(self.global_entries.get("cord_hole_diameter"), match[1].split(" mm", 1)[0])
 
     def _float_value(self, entry_map, key):
         value = float(entry_map[key].text().strip())
@@ -284,8 +327,13 @@ class FingerboardGUI(QMainWindow):
     def on_preview(self, show_dialog: bool = True) -> None:
         try:
             params = self._collect_params()
-            prepared = _prepare_fingerboard(params)
-            shape, warning = build_fingerboard(params, prepared=prepared)
+            bulk_cord_preference = self._bulk_cord_adjustment_preference()
+            prepared = _prepare_fingerboard(params, bulk_cord_preference=bulk_cord_preference)
+            shape, warning = build_fingerboard(
+                params,
+                prepared=prepared,
+                bulk_cord_preference=bulk_cord_preference,
+            )
             # Swap length and width for output
             board_width, board_length, board_height = (
                 prepared.board_length,
@@ -302,22 +350,10 @@ class FingerboardGUI(QMainWindow):
             )
             self.status_label.setText(msg)
             if warning:
-                import re
-                z_match = re.search(r"side_chamfer[^\n]*Clamped to ([0-9.]+) mm", warning)
-                if z_match:
-                    clamped_val = z_match.group(1)
-                    entry = self.advanced_entries.get("side_chamfer")
-                    if entry:
-                        entry.setText(clamped_val)
-                tb_match = re.search(r"top/bottom chamfer[^\n]*Clamped to ([0-9.]+) mm", warning)
-                if tb_match:
-                    clamped_val = tb_match.group(1)
-                    entry = self.advanced_entries.get("top_bottom_chamfer")
-                    if entry:
-                        entry.setText(clamped_val)
+                self._apply_clamped_values_from_warning(warning)
                 self._set_warning_text(warning)
                 if show_dialog:
-                    QMessageBox.warning(self, "Chamfer Clamped", warning)
+                    QMessageBox.warning(self, "Parameters Adjusted", warning)
             else:
                 self._set_warning_text("")
         except Exception as exc:
@@ -329,7 +365,8 @@ class FingerboardGUI(QMainWindow):
     def on_export(self) -> None:
         try:
             params = self._collect_params()
-            prepared = _prepare_fingerboard(params)
+            bulk_cord_preference = self._bulk_cord_adjustment_preference()
+            prepared = _prepare_fingerboard(params, bulk_cord_preference=bulk_cord_preference)
             # Swap length and width for output
             board_width, board_length, board_height = (
                 prepared.board_length,
@@ -405,7 +442,11 @@ class FingerboardGUI(QMainWindow):
                 }
                 export_type = suffix_map.get(target_path.suffix.lower())
 
-            shape, warning = build_fingerboard(params, prepared=prepared)
+            shape, warning = build_fingerboard(
+                params,
+                prepared=prepared,
+                bulk_cord_preference=bulk_cord_preference,
+            )
             output = export_stl(
                 params,
                 target_path,
@@ -419,8 +460,9 @@ class FingerboardGUI(QMainWindow):
             )
             self.status_label.setToolTip(str(output_path))
             if warning:
+                self._apply_clamped_values_from_warning(warning)
                 self._set_warning_text(warning)
-                QMessageBox.warning(self, "Chamfer Clamped", warning)
+                QMessageBox.warning(self, "Parameters Adjusted", warning)
             else:
                 self._set_warning_text("")
         except Exception as exc:

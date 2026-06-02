@@ -182,7 +182,81 @@ def _finger_depths(hand_span: float, side: SideParameters) -> list[float]:
     return [base + (max_plateau - p) for p in plateaus]
 
 
-def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
+def _sanitize_center_bulk_and_cord(
+    center_bulk: float,
+    cord_hole_diameter: float,
+    board_height: float,
+    bulk_cord_preference: Literal["center_bulk", "cord_hole_diameter", "auto"] = "auto",
+) -> tuple[float, float, list[str]]:
+    """
+    Clamps center bulk and cord hole diameter to a geometry-safe combination.
+
+    Rules:
+      - center_bulk must be >= 2.0 mm
+      - cord_hole_diameter must be >= 0.0 mm
+      - cord_hole_diameter must be <= center_bulk - 2.0 mm
+      - cord_hole_diameter must be <= board_height
+
+        Preference behavior:
+            - center_bulk: prioritize keeping cord_hole_diameter and increase center_bulk when needed.
+            - cord_hole_diameter: prioritize keeping center_bulk and decrease cord_hole_diameter when needed.
+            - auto: same as cord_hole_diameter.
+
+        Returns:
+        tuple[float, float, list[str]]:
+            (safe_center_bulk, safe_cord_hole_diameter, warning_messages)
+    """
+    warnings: list[str] = []
+
+    safe_center_bulk = center_bulk
+    if safe_center_bulk < 2.0:
+        warnings.append(
+            f"center_bulk too small for a safe cord channel. Clamped to 2.00 mm (was {center_bulk:.2f} mm)."
+        )
+        safe_center_bulk = 2.0
+
+    safe_cord = cord_hole_diameter
+    if safe_cord < 0.0:
+        warnings.append(
+            f"cord_hole_diameter cannot be negative. Clamped to 0.00 mm (was {cord_hole_diameter:.2f} mm)."
+        )
+        safe_cord = 0.0
+
+    max_height_cord = max(0.0, board_height)
+
+    preference = bulk_cord_preference
+    if preference == "auto":
+        preference = "cord_hole_diameter"
+
+    if preference == "center_bulk":
+        min_center_for_cord = safe_cord + 2.0
+        if safe_center_bulk < min_center_for_cord:
+            warnings.append(
+                f"center_bulk too small for the requested cord hole. Clamped to {min_center_for_cord:.2f} mm so center_bulk >= cord_hole_diameter + 2.00 mm."
+            )
+            safe_center_bulk = min_center_for_cord
+    else:
+        max_cord_for_bulk = max(0.0, safe_center_bulk - 2.0)
+        max_cord = min(max_cord_for_bulk, max_height_cord)
+        if safe_cord > max_cord:
+            warnings.append(
+                f"cord_hole_diameter too large for the current bulk. Clamped to {max_cord:.2f} mm so cord_hole_diameter <= center_bulk - 2.00 mm."
+            )
+            safe_cord = max_cord
+
+    if safe_cord > max_height_cord:
+        warnings.append(
+            f"cord_hole_diameter too large for current board_height. Clamped to {max_height_cord:.2f} mm so cord_hole_diameter <= board_height."
+        )
+        safe_cord = max_height_cord
+
+    return safe_center_bulk, safe_cord, warnings
+
+
+def _prepare_fingerboard(
+    params: FingerboardParameters,
+    bulk_cord_preference: Literal["center_bulk", "cord_hole_diameter", "auto"] = "auto",
+) -> PreparedFingerboard:
     """
     Validates the provided fingerboard parameters and computes all geometric values required to build the fingerboard.
 
@@ -198,7 +272,7 @@ def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
         PreparedFingerboard: A dataclass containing all validated and precomputed geometric values needed for model construction.
 
     Raises:
-        ValueError: If any parameter is invalid (e.g., negative edge rounding, finger depths < 8 mm, cord hole diameter too large).
+        ValueError: If any parameter is invalid (e.g., negative edge rounding, finger depths < 8 mm).
     """
     if params.edge_rounding < 0:
         raise ValueError("edge_rounding must be >= 0 mm")
@@ -211,14 +285,24 @@ def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
     right_finger_depths = _finger_depths(params.hand_span, params.right)
     left_max_depth = max(left_finger_depths)
     right_max_depth = max(right_finger_depths)
+    # board height is bottom_layer_thickness + user edge_depth
+    board_height = params.bottom_layer_thickness + params.edge_depth
+
+    safe_center_bulk, _, _ = _sanitize_center_bulk_and_cord(
+        params.center_bulk,
+        params.cord_hole_diameter,
+        board_height,
+        bulk_cord_preference=bulk_cord_preference,
+    )
+
     # Both sides get full top_margin on each side (total 2x)
     left_required_reach = (
-        (params.center_bulk / 2.0)
+        (safe_center_bulk / 2.0)
         + left_max_depth
         + params.top_margin
     )
     right_required_reach = (
-        (params.center_bulk / 2.0)
+        (safe_center_bulk / 2.0)
         + right_max_depth
         + params.top_margin
     )
@@ -232,9 +316,6 @@ def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
     left_outer_reach = left_required_reach
     right_outer_reach = right_required_reach
 
-    # board height is bottom_layer_thickness + user edge_depth
-    board_height = params.bottom_layer_thickness + params.edge_depth
-
     for side_name, _, finger_depths in (
         ("left", params.left, left_finger_depths),
         ("right", params.right, right_finger_depths),
@@ -244,12 +325,6 @@ def _prepare_fingerboard(params: FingerboardParameters) -> PreparedFingerboard:
                 raise ValueError(
                     f"{side_name}.{finger_name} depth must be >= 8 mm"
                 )
-
-    if params.cord_hole_diameter > params.center_bulk - 2.0:
-        raise ValueError("cord_hole_diameter must be at least 2 mm smaller than center_bulk")
-
-    if params.cord_hole_diameter > board_height:
-        raise ValueError(f"cord_hole_diameter must be <= board_height ({board_height:.1f} mm)")
 
     return PreparedFingerboard(
         board_length=board_length,
@@ -279,6 +354,7 @@ def derive_dimensions(params: FingerboardParameters) -> tuple[float, float, floa
 def build_fingerboard(
     params: FingerboardParameters,
     prepared: PreparedFingerboard | None = None,
+    bulk_cord_preference: Literal["center_bulk", "cord_hole_diameter", "auto"] = "auto",
 ) -> tuple[cq.Workplane, str | None]:
     """
     Constructs the 3D fingerboard model using CadQuery based on the provided parameters and precomputed geometry.
@@ -316,7 +392,7 @@ def build_fingerboard(
         8. Return the final CadQuery object and any warnings about parameter clamping.
     """
     if prepared is None:
-        prepared = _prepare_fingerboard(params)
+        prepared = _prepare_fingerboard(params, bulk_cord_preference=bulk_cord_preference)
 
     board_length = prepared.board_length
     board_width = prepared.board_width
@@ -328,14 +404,14 @@ def build_fingerboard(
     min_margin = min(params.top_margin, params.side_margin)
     side_tolerance = min_margin / 6.0
     max_side_chamfer = max(0.0, min_margin - side_tolerance)
-    warning = None
+    warning_messages: list[str] = []
     side_chamfer = params.side_chamfer
     if side_chamfer < 0:
         side_chamfer = 0.0
-        warning = "side_chamfer cannot be negative. Clamped to 0.00 mm."
+        warning_messages.append("side_chamfer cannot be negative. Clamped to 0.00 mm.")
     elif side_chamfer > max_side_chamfer:
         side_chamfer = max_side_chamfer
-        warning = (
+        warning_messages.append(
             f"side_chamfer too large and would cut into the fingerbox. "
             f"Clamped to {max_side_chamfer:.2f} mm (tolerance {side_tolerance:.2f} mm)."
         )
@@ -345,26 +421,24 @@ def build_fingerboard(
     tb_tolerance = min_margin / 6.0
     max_tb_chamfer = max(0.0, min_margin - tb_tolerance)
     tb_chamfer = params.top_bottom_chamfer
-    tb_chamfer_clamped = False
-    tb_warning = None
     # Clamp to [0, max_tb_chamfer]
     if tb_chamfer < 0:
         tb_chamfer = 0.0
-        tb_chamfer_clamped = True
-        tb_warning = (
-            f"top/bottom chamfer cannot be negative. Clamped to 0.00 mm.")
+        warning_messages.append("top/bottom chamfer cannot be negative. Clamped to 0.00 mm.")
     elif tb_chamfer > max_tb_chamfer:
         tb_chamfer = max_tb_chamfer
-        tb_chamfer_clamped = True
-        tb_warning = (
+        warning_messages.append(
             f"top/bottom chamfer too large and would cut into the fingerbox. "
             f"Clamped to {max_tb_chamfer:.2f} mm (tolerance {tb_tolerance:.2f} mm)."
         )
-    if tb_chamfer_clamped:
-        if warning and tb_warning is not None:
-            warning += " " + tb_warning
-        else:
-            warning = tb_warning
+
+    safe_center_bulk, safe_cord_hole_diameter, bulk_cord_warnings = _sanitize_center_bulk_and_cord(
+        params.center_bulk,
+        params.cord_hole_diameter,
+        board_height,
+        bulk_cord_preference=bulk_cord_preference,
+    )
+    warning_messages.extend(bulk_cord_warnings)
 
     body = cq.Workplane("XY").box(
         board_length,
@@ -394,7 +468,7 @@ def build_fingerboard(
         centers_x = [left_edge + (i + 0.5) * slot_width for i in range(n_slots)]
 
         # Center-facing pocket wall: only center_bulk applies, not margin
-        inner_wall_abs = (params.center_bulk / 2.0)
+        inner_wall_abs = (safe_center_bulk / 2.0)
 
 
         for cx, pocket_depth in zip(centers_x, finger_depths):
@@ -414,7 +488,7 @@ def build_fingerboard(
 
     # Single rope hole at the center of the ridge.
     hole_z = board_height / 2.0
-    hole_radius = params.cord_hole_diameter / 2.0
+    hole_radius = safe_cord_hole_diameter / 2.0
     center_hole = (
         cq.Workplane("YZ")
         .center(0.0, hole_z)
@@ -460,6 +534,7 @@ def build_fingerboard(
 
     body = body.cut(side_text_1).cut(side_text_2)
 
+    warning = "\n".join(warning_messages) if warning_messages else None
     return body, warning
 
 
