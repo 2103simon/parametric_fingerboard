@@ -40,6 +40,12 @@ class FingerboardGUI(QMainWindow):
         self.status_label.setWordWrap(True)
         self.status_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self.status_label.setMinimumWidth(0)
+        self.warning_label = QLabel("")
+        self.warning_label.setWordWrap(True)
+        self.warning_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.warning_label.setMinimumWidth(0)
+        self.warning_label.setStyleSheet("color: #8a1f1f; background: #fbeaea; padding: 4px; border-radius: 3px;")
+        self.warning_label.hide()
         self.global_entries = {}
         self.left_entries = {}
         self.right_entries = {}
@@ -110,6 +116,7 @@ class FingerboardGUI(QMainWindow):
         export_btn.clicked.connect(self.on_export)
         actions_layout.addWidget(export_btn)
         actions_layout.addWidget(self.status_label)
+        actions_layout.addWidget(self.warning_label)
         controls_layout.addWidget(actions_widget)
         controls_layout.addStretch(1)
 
@@ -172,6 +179,14 @@ class FingerboardGUI(QMainWindow):
         for entry in list(self.global_entries.values()) + list(self.left_entries.values()) + list(self.right_entries.values()) + list(self.advanced_entries.values()):
             entry.textChanged.connect(self._schedule_preview)
         self._schedule_preview()
+
+    def _set_warning_text(self, text: str = "") -> None:
+        if text.strip():
+            self.warning_label.setText(f"Warning:\n{text.strip()}")
+            self.warning_label.show()
+        else:
+            self.warning_label.clear()
+            self.warning_label.hide()
 
     def _float_value(self, entry_map, key):
         value = float(entry_map[key].text().strip())
@@ -264,6 +279,7 @@ class FingerboardGUI(QMainWindow):
         error_label = QLabel(f"Invalid parameters:\n{message}")
         error_label.setStyleSheet("color: #8a1f1f; background: #fbeaea; font-size: 14px;")
         self.status_label.setText(f"Preview failed: {message}")
+        self._set_warning_text(message)
 
     def on_preview(self, show_dialog: bool = True) -> None:
         try:
@@ -284,8 +300,8 @@ class FingerboardGUI(QMainWindow):
                 "Preview updated | "
                 f"L={board_length:.1f} mm, W={board_width:.1f} mm, H={board_height:.1f} mm"
             )
+            self.status_label.setText(msg)
             if warning:
-                msg += f" | {warning}"
                 import re
                 z_match = re.search(r"side_chamfer[^\n]*Clamped to ([0-9.]+) mm", warning)
                 if z_match:
@@ -299,11 +315,11 @@ class FingerboardGUI(QMainWindow):
                     entry = self.advanced_entries.get("top_bottom_chamfer")
                     if entry:
                         entry.setText(clamped_val)
-                self.status_label.setText(msg)
+                self._set_warning_text(warning)
                 if show_dialog:
                     QMessageBox.warning(self, "Chamfer Clamped", warning)
             else:
-                self.status_label.setText(msg)
+                self._set_warning_text("")
         except Exception as exc:
             self.status_label.setText(f"Preview failed: {exc}")
             self._render_error_preview(str(exc))
@@ -341,6 +357,7 @@ class FingerboardGUI(QMainWindow):
             )
             if not path:
                 self.status_label.setText("Export cancelled")
+                self._set_warning_text("")
                 return
 
             filter_to_export: dict[str, tuple[ExportType, str]] = {
@@ -402,9 +419,13 @@ class FingerboardGUI(QMainWindow):
             )
             self.status_label.setToolTip(str(output_path))
             if warning:
+                self._set_warning_text(warning)
                 QMessageBox.warning(self, "Chamfer Clamped", warning)
+            else:
+                self._set_warning_text("")
         except Exception as exc:
             self.status_label.setText(f"Export failed: {exc}")
+            self._set_warning_text(str(exc))
             QMessageBox.critical(self, "Export failed", str(exc))
 
 
