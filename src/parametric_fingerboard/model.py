@@ -31,11 +31,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 import cadquery as cq
 from cadquery import exporters
 
 FINGER_ORDER = ("index", "middle", "ring", "pinky")
+ExportType = Literal["STL", "STEP", "AMF", "SVG", "TJS", "DXF", "VRML", "VTP", "3MF", "BREP", "BIN"]
 
 
 @dataclass(slots=True)
@@ -78,7 +80,7 @@ class FingerboardParameters:
     edge_rounding: float = 2.5
     side_margin: float = 8.0
     top_margin: float = 8.0
-    center_bulk: float = 10.0
+    center_bulk: float = 15.0
     edge_depth: float = 20.0
     # Advanced parameters
     bottom_layer_thickness: float = 5.0
@@ -467,9 +469,10 @@ def export_stl(
     tolerance: float = 0.15,
     shape: cq.Workplane | None = None,
     prepared: PreparedFingerboard | None = None,
+    export_type: ExportType | None = None,
 ) -> Path:
     """
-    Exports the fingerboard model as an STL file.
+    Exports the fingerboard model using CadQuery exporters.
 
     Args:
         params (FingerboardParameters): Parameters for the fingerboard geometry.
@@ -477,6 +480,8 @@ def export_stl(
         tolerance (float, optional): Export tolerance for mesh accuracy. Defaults to 0.15.
         shape (cq.Workplane, optional): Optional pre-built CadQuery shape. If None, the shape is built from params.
         prepared (PreparedFingerboard, optional): Optional precomputed geometry.
+        export_type (str | None, optional): Explicit CadQuery export type (e.g. "STL", "3MF", "STEP").
+            If None, CadQuery infers type from the file extension.
 
     Returns:
         Path: Path to the exported STL file.
@@ -485,5 +490,5 @@ def export_stl(
         shape, _ = build_fingerboard(params, prepared=prepared)
     target = Path(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
-    exporters.export(shape, str(target), tolerance=tolerance)  # File type can also be 3mf. TODO make export type selectable (as well as tolerances?) 
+    exporters.export(shape, str(target), exportType=export_type, tolerance=tolerance)
     return target

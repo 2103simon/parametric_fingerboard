@@ -8,6 +8,7 @@ Implements the main window, parameter entry forms, preview rendering, and STL ex
 
 import tempfile
 from pathlib import Path
+from typing import cast
 import numpy as np
 import trimesh
 from PyQt6.QtWidgets import (
@@ -20,6 +21,7 @@ from pyqtgraph.Qt import QtGui
 from parametric_fingerboard.model import (
     FingerboardParameters,
     SideParameters,
+    ExportType,
     build_fingerboard,
     _prepare_fingerboard,
     export_stl,
@@ -35,6 +37,9 @@ class FingerboardGUI(QMainWindow):
         self.resize(1540, 920)
 
         self.status_label = QLabel("Ready")
+        self.status_label.setWordWrap(True)
+        self.status_label.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.status_label.setMinimumWidth(0)
         self.global_entries = {}
         self.left_entries = {}
         self.right_entries = {}
@@ -140,7 +145,7 @@ class FingerboardGUI(QMainWindow):
             "edge_rounding": "2.5",
             "side_margin": "8",
             "top_margin": "8",
-            "center_bulk": "10",
+            "center_bulk": "15",
             "edge_depth": "20",
             "cord_hole_diameter": "8",
         }
@@ -315,15 +320,89 @@ class FingerboardGUI(QMainWindow):
                 prepared.board_width,
                 prepared.board_height,
             )
-            path, _ = QFileDialog.getSaveFileName(self, "Save STL", "", "STL mesh (*.stl)")
+            export_filters = (
+                "STL mesh (*.stl);;"
+                "3MF mesh (*.3mf);;"
+                "STEP model (*.step *.stp);;"
+                "AMF mesh (*.amf);;"
+                "SVG drawing (*.svg);;"
+                "TJS model (*.json *.tjs);;"
+                "DXF drawing (*.dxf);;"
+                "VRML model (*.wrl *.vrml);;"
+                "VTP model (*.vtp);;"
+                "BREP model (*.brep);;"
+                "BIN BREP model (*.bin)"
+            )
+            path, selected_filter = QFileDialog.getSaveFileName(
+                self,
+                "Save Model",
+                "",
+                export_filters,
+            )
             if not path:
                 self.status_label.setText("Export cancelled")
                 return
-            shape = build_fingerboard(params, prepared=prepared)
-            output = export_stl(params, path, shape=shape, prepared=prepared)
-            self.status_label.setText(
-                f"STL exported | L={board_length:.1f} mm, W={board_width:.1f} mm, H={board_height:.1f} mm | {output}"
+
+            filter_to_export: dict[str, tuple[ExportType, str]] = {
+                "STL": ("STL", ".stl"),
+                "3MF": ("3MF", ".3mf"),
+                "STEP": ("STEP", ".step"),
+                "AMF": ("AMF", ".amf"),
+                "SVG": ("SVG", ".svg"),
+                "TJS": ("TJS", ".tjs"),
+                "DXF": ("DXF", ".dxf"),
+                "VRML": ("VRML", ".wrl"),
+                "VTP": ("VTP", ".vtp"),
+                "BREP": ("BREP", ".brep"),
+                "BIN": ("BIN", ".bin"),
+            }
+
+            export_type: ExportType | None = None
+            default_ext = ""
+            for key, (etype, ext) in filter_to_export.items():
+                if selected_filter.startswith(key):
+                    export_type = etype
+                    default_ext = ext
+                    break
+
+            target_path = Path(path)
+            if default_ext and target_path.suffix == "":
+                target_path = target_path.with_suffix(default_ext)
+
+            if export_type is None and target_path.suffix:
+                suffix_map: dict[str, ExportType] = {
+                    ".stl": "STL",
+                    ".3mf": "3MF",
+                    ".step": "STEP",
+                    ".stp": "STEP",
+                    ".amf": "AMF",
+                    ".svg": "SVG",
+                    ".json": "TJS",
+                    ".tjs": "TJS",
+                    ".dxf": "DXF",
+                    ".wrl": "VRML",
+                    ".vrml": "VRML",
+                    ".vtp": "VTP",
+                    ".brep": "BREP",
+                    ".bin": "BIN",
+                }
+                export_type = suffix_map.get(target_path.suffix.lower())
+
+            shape, warning = build_fingerboard(params, prepared=prepared)
+            output = export_stl(
+                params,
+                target_path,
+                shape=shape,
+                prepared=prepared,
+                export_type=export_type,
             )
+            output_path = Path(output)
+            self.status_label.setText(
+                f"{cast(str, export_type or 'AUTO')} exported | L={board_length:.1f} mm, W={board_width:.1f} mm, H={board_height:.1f} mm | {output_path.name}"
+            )
+            self.status_label.setToolTip(str(output_path))
+            if warning:
+                QMessageBox.warning(self, "Chamfer Clamped", warning)
         except Exception as exc:
             self.status_label.setText(f"Export failed: {exc}")
             QMessageBox.critical(self, "Export failed", str(exc))
