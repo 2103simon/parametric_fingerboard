@@ -3,6 +3,10 @@
 
 Desktop GUI application for designing a parametric fingerboard and exporting 3D models for fabrication.
 
+## GUI Preview
+
+![Parametric Fingerboard GUI](assets/gui_preview.png)
+
 ## Features
 - Interactive PyQt6 GUI with live 3D preview
 - Parametric geometry with independent left/right finger-depth deltas
