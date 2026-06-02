@@ -321,38 +321,25 @@ def build_fingerboard(
     board_height = prepared.board_height
     body_center_y = (prepared.left_outer_reach - prepared.right_outer_reach) / 2.0
 
-    # --- Calculate max safe z chamfer ---
-    min_dist = float('inf')
-    n_slots = 4
-    slot_width = params.hand_span / n_slots
-    left_edge = -0.5 * params.hand_span
-    for side_sign, _, finger_depths in (
-        (-1.0, params.right, prepared.right_finger_depths),
-        (1.0, params.left, prepared.left_finger_depths),
-    ):
-        centers_x = [left_edge + (i + 0.5) * slot_width for i in range(n_slots)]
-        inner_wall_abs = (params.center_bulk / 2.0)
-        for cx, pocket_depth in zip(centers_x, finger_depths):
-            y_center = side_sign * (inner_wall_abs + pocket_depth / 2.0)
-            dist_x1 = abs((board_length / 2.0) - abs(cx + slot_width / 2.0))
-            dist_x2 = abs((board_length / 2.0) - abs(cx - slot_width / 2.0))
-            dist_y1 = abs((board_width / 2.0) - abs(y_center + pocket_depth / 2.0))
-            dist_y2 = abs((board_width / 2.0) - abs(y_center - pocket_depth / 2.0))
-            min_dist = min(min_dist, dist_x1, dist_x2, dist_y1, dist_y2)
-    margin = min_dist / 6.0
-    max_side_chamfer = max(0.0, min_dist - margin)
+    # --- Calculate max safe side chamfer based only on available margins ---
+    # Chamfer size must only depend on geometric clearance margins, not board length/width.
+    min_margin = min(params.top_margin, params.side_margin)
+    side_tolerance = min_margin / 6.0
+    max_side_chamfer = max(0.0, min_margin - side_tolerance)
     warning = None
     side_chamfer = params.side_chamfer
-    if side_chamfer > max_side_chamfer:
+    if side_chamfer < 0:
+        side_chamfer = 0.0
+        warning = "side_chamfer cannot be negative. Clamped to 0.00 mm."
+    elif side_chamfer > max_side_chamfer:
         side_chamfer = max_side_chamfer
         warning = (
             f"side_chamfer too large and would cut into the fingerbox. "
-            f"Clamped to {max_side_chamfer:.2f} mm (margin {margin:.2f} mm)."
+            f"Clamped to {max_side_chamfer:.2f} mm (tolerance {side_tolerance:.2f} mm)."
         )
 
     # --- Calculate max safe top/bottom chamfer based on margin to fingerbox ---
     # The chamfer must not bring the edge closer to the fingerbox than the minimum of top_margin or side_margin, minus a tolerance.
-    min_margin = min(params.top_margin, params.side_margin)
     tb_tolerance = min_margin / 6.0
     max_tb_chamfer = max(0.0, min_margin - tb_tolerance)
     tb_chamfer = params.top_bottom_chamfer
@@ -372,7 +359,7 @@ def build_fingerboard(
             f"Clamped to {max_tb_chamfer:.2f} mm (tolerance {tb_tolerance:.2f} mm)."
         )
     if tb_chamfer_clamped:
-        if warning:
+        if warning and tb_warning is not None:
             warning += " " + tb_warning
         else:
             warning = tb_warning
@@ -495,7 +482,7 @@ def export_stl(
         Path: Path to the exported STL file.
     """
     if shape is None:
-        shape = build_fingerboard(params, prepared=prepared)
+        shape, _ = build_fingerboard(params, prepared=prepared)
     target = Path(output_path)
     target.parent.mkdir(parents=True, exist_ok=True)
     exporters.export(shape, str(target), tolerance=tolerance)  # File type can also be 3mf. TODO make export type selectable (as well as tolerances?) 
