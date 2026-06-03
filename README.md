@@ -5,7 +5,26 @@ Desktop GUI application for designing a parametric fingerboard and exporting 3D 
 
 ## GUI Preview
 
-![Parametric Fingerboard GUI](assets/gui_preview.png)
+<p align="center">
+	<img src="assets/gui_preview.png" alt="Parametric Fingerboard GUI" style="max-width:780px; width:100%; height:auto;" />
+</p>
+
+## Measuring Finger Height Differences
+
+<div style="display:flex; gap:16px; align-items:flex-start; flex-wrap:wrap;">
+	<figure style="flex:1 1 320px; margin:0; text-align:center;">
+		<img src="assets/palm_side_annotated.png" alt="Palm-side annotated measurement example" style="height:280px; width:auto; max-width:100%; object-fit:contain;" />
+		<figcaption>Palm-side measurement</figcaption>
+	</figure>
+	<figure style="flex:1 1 320px; margin:0; text-align:center;">
+		<img src="assets/back_side_annotated.png" alt="Back-side annotated measurement example" style="height:280px; width:auto; max-width:100%; object-fit:contain; background-color:#ffffff; padding:8px; box-sizing:border-box;" />
+		<figcaption>Back-of-hand measurement</figcaption>
+	</figure>
+</div>
+
+There are two ways to measure the difference in height: from the palm side or from the back of the hand side. At the moment it is not yet clear which method is best, so either measurement style is acceptable.
+
+Measure the height difference as a positive value only, then enter that positive number in the GUI. The app treats these values as absolute differences.
 
 ## Features
 - Interactive PyQt6 GUI with live 3D preview
@@ -30,9 +49,22 @@ Desktop GUI application for designing a parametric fingerboard and exporting 3D 
 ## Requirements
 - Python 3.10+
 
-Core package dependencies are declared in `pyproject.toml`.
+Python package dependencies are listed in `requirements.txt`.
 
-GUI/runtime dependencies are listed in `requirements.txt`.
+Some non-pip system dependencies are still required for OpenGL rendering on Linux.
+
+On Ubuntu 22.04, install them with:
+
+```bash
+sudo apt update
+sudo apt install -y libgl1-mesa-dri libglx-mesa0 libglu1-mesa mesa-utils
+```
+
+If you want to verify the system OpenGL setup, run:
+
+```bash
+glxinfo | grep "OpenGL version"
+```
 
 ## Development Setup
 
@@ -56,6 +88,8 @@ source .venv/bin/activate
 pip install -r requirements.txt
 pip install -e .
 ```
+
+This installs the full Python stack needed by the GUI and the CAD model code.
 
 ## Run the App
 
