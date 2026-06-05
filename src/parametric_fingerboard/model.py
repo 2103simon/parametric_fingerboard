@@ -486,16 +486,40 @@ def build_fingerboard(
             )
             body = body.cut(pocket)
             
-            # # Sattle for the fingers to rest on the stairs.
-            # hole_z = board_height / 2.0
-            # hole_radius = safe_cord_hole_diameter / 2.0
-            # center_hole = (
-            #     cq.Workplane("YZ")
-            #     .center(0.0, hole_z)
-            #     .circle(hole_radius)
-            #     .extrude((board_length / 2.0) + 2.0, both=True)
+            # Sattle for the fingers to rest on the stairs.
+            hole_radius = 5.0
+            sattle_y = side_sign * (pocket_depth_val + hole_radius)
+            # limiting box to only cut stairs
+            sattle_width = pocket_width
+            sattle_length = pocket_depth_val + 4.0  # local region only
+            sattle_depth = params.edge_depth / 2.0
+            # Cylindrical groove cutter
+            cutter = (
+                cq.Workplane("XY")
+                .center(cx, sattle_y)
+                .circle(hole_radius)
+                .extrude(sattle_depth, both=True)
+                .translate((0.0, 0.0, z_center))
+            )
+            body = body.cut(cutter)
+            
+            # Limit region with a box
+            # limit_box = (
+            #     cq.Workplane("XY")
+            #     .center(cx, y_center)
+            #     .box(
+            #         sattle_width,
+            #         sattle_length,
+            #         sattle_depth,
+            #         centered=(True, True, False)
+            #     )
+            #     .translate((0, 0, board_height - sattle_depth))
             # )
-            # body = body.cut(center_hole)
+
+            # # Keep only intersecting region
+            # sattle = cutter.intersect(limit_box)
+
+            # body = body.cut(sattle)
 
     # Single rope hole at the center of the ridge.
     hole_z = board_height / 2.0
