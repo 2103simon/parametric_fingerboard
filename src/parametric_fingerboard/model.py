@@ -73,6 +73,7 @@ class FingerboardParameters:
         side_chamfer (float): Chamfer size for vertical edges.
         top_bottom_chamfer (float): Chamfer size for top/bottom edges.
         cord_hole_diameter (float): Diameter of the cord hole.
+        groove_factor (float): Scaling factor for the finger sattle (groove) radius, relative to hand span.
     """
     left: SideParameters
     right: SideParameters
@@ -87,6 +88,7 @@ class FingerboardParameters:
     side_chamfer: float = 5.0
     top_bottom_chamfer: float = 2.0
     cord_hole_diameter: float = 8.0
+    groove_factor: float = 0.74
 
 
 
@@ -454,6 +456,9 @@ def build_fingerboard(
     if tb_chamfer > 0:
         body = body.faces(">Z").wires().toPending().edges().chamfer(tb_chamfer)
         body = body.faces("<Z").wires().toPending().edges().chamfer(tb_chamfer)
+    
+    
+    sattle_penetration = 2.0  # TODO do we need to scale this as well?
 
     # UI mapping: "Left Hand" controls left visual side and "Right Hand" right side.
     # Finger slot order is index -> middle -> ring -> pinky for both sides.
@@ -474,52 +479,59 @@ def build_fingerboard(
         for cx, pocket_depth in zip(centers_x, finger_depths):
             y_center = side_sign * (inner_wall_abs + pocket_depth / 2.0)
             pocket_width = slot_width
-            pocket_depth_val = pocket_depth
-            pocket_height = params.edge_depth
+            pocket_height = params.edge_depth  # cut full depth minus sattle penetration for the groove
             z_center = params.bottom_layer_thickness + pocket_height / 2.0
 
             pocket = (
                 cq.Workplane("XY")
                 .center(cx, y_center)
-                .box(pocket_width, pocket_depth_val, pocket_height, centered=(True, True, True))
+                .box(
+                    pocket_width, 
+                    pocket_depth - sattle_penetration, 
+                    pocket_height, 
+                    centered=(True, True, True)
+                )
                 .translate((0.0, 0.0, z_center))
             )
             body = body.cut(pocket)
             
             # Sattle for the fingers to rest on the stairs.
-            hole_radius = 5.0
-            sattle_y = side_sign * (pocket_depth_val + hole_radius)
-            # limiting box to only cut stairs
-            sattle_width = pocket_width
-            sattle_length = pocket_depth_val + 4.0  # local region only
-            sattle_depth = params.edge_depth / 2.0
+            sattle_scale = params.groove_factor
+            hole_radius = params.hand_span * sattle_scale
+            sattle_offset = hole_radius - sattle_penetration
+            sattle_y = side_sign * (inner_wall_abs + pocket_depth - sattle_offset)
+            sattle_depth = params.edge_depth
+            
             # Cylindrical groove cutter
             cutter = (
                 cq.Workplane("XY")
                 .center(cx, sattle_y)
                 .circle(hole_radius)
-                .extrude(sattle_depth, both=True)
+                .extrude(sattle_depth / 2.0, both=True)
                 .translate((0.0, 0.0, z_center))
             )
-            body = body.cut(cutter)
             
+            # limiting box to only cut stairs
+            sattle_width = slot_width
+            sattle_length = 2 * sattle_penetration  # local region only
+            box_y = side_sign * (inner_wall_abs + pocket_depth)
             # Limit region with a box
-            # limit_box = (
-            #     cq.Workplane("XY")
-            #     .center(cx, y_center)
-            #     .box(
-            #         sattle_width,
-            #         sattle_length,
-            #         sattle_depth,
-            #         centered=(True, True, False)
-            #     )
-            #     .translate((0, 0, board_height - sattle_depth))
-            # )
+            limit_box = (
+                cq.Workplane("XY")
+                .center(cx, box_y)
+                .box(
+                    sattle_width,
+                    sattle_length,
+                    sattle_depth,
+                    centered=(True, True, True)
+                )
+                .translate((0, 0, z_center))
+            )
 
-            # # Keep only intersecting region
-            # sattle = cutter.intersect(limit_box)
+            # Keep only intersecting region
+            sattle = cutter.intersect(limit_box)
 
-            # body = body.cut(sattle)
+            body = body.cut(sattle)
 
     # Single rope hole at the center of the ridge.
     hole_z = board_height / 2.0
