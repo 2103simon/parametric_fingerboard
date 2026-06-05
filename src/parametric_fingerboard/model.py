@@ -485,6 +485,17 @@ def build_fingerboard(
                 .translate((0.0, 0.0, z_center))
             )
             body = body.cut(pocket)
+            
+            # # Sattle for the fingers to rest on the stairs.
+            # hole_z = board_height / 2.0
+            # hole_radius = safe_cord_hole_diameter / 2.0
+            # center_hole = (
+            #     cq.Workplane("YZ")
+            #     .center(0.0, hole_z)
+            #     .circle(hole_radius)
+            #     .extrude((board_length / 2.0) + 2.0, both=True)
+            # )
+            # body = body.cut(center_hole)
 
     # Single rope hole at the center of the ridge.
     hole_z = board_height / 2.0

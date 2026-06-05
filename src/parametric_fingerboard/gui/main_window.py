@@ -282,6 +282,41 @@ class FingerboardGUI(QMainWindow):
             cord_hole_diameter=self._float_value(self.global_entries, "cord_hole_diameter"),
         )
 
+    def _add_coordinate_axes(self, center: np.ndarray, size: float) -> None:
+        """Adds a world-space XYZ axis gizmo to the preview scene.
+
+        The axis is placed near the model center so it rotates consistently with the
+        model as the user orbits the camera.
+        """
+        axis_length = max(10.0, size * 0.35)
+        axis = gl.GLAxisItem()
+        axis.setSize(x=axis_length, y=axis_length, z=axis_length)
+        axis.translate(float(center[0]), float(center[1]), float(center[2]))
+        self.gl_view.addItem(axis)
+
+        # Label axis tips if GLTextItem is available in the installed pyqtgraph.
+        text_item_cls = getattr(gl, "GLTextItem", None)
+        if text_item_cls is None:
+            return
+
+        labels = (
+            ("X", np.array([axis_length, 0.0, 0.0], dtype=float)),
+            ("Y", np.array([0.0, axis_length, 0.0], dtype=float)),
+            ("Z", np.array([0.0, 0.0, axis_length], dtype=float)),
+        )
+        for label, offset in labels:
+            pos = center + offset
+            try:
+                item = text_item_cls(pos=pos, text=label)
+            except TypeError:
+                # Fallback constructor shape for older/newer GLTextItem variants.
+                item = text_item_cls()
+                if hasattr(item, "setData"):
+                    item.setData(pos=pos, text=label)
+                else:
+                    continue
+            self.gl_view.addItem(item)
+
     def _render_preview(self, stl_path: Path) -> None:
         mesh = trimesh.load_mesh(stl_path)
         # Remove previous mesh
@@ -313,6 +348,7 @@ class FingerboardGUI(QMainWindow):
         maxs = bounds[1]
         center = (mins + maxs) / 2
         size = (maxs - mins).max()
+        self._add_coordinate_axes(center, float(size))
         self.gl_view.setCameraPosition(pos=QtGui.QVector3D(center[0], center[1], center[2] + size * 1.5), distance=size * 2)
         self.gl_view.opts['center'] = QtGui.QVector3D(*center)
 
