@@ -85,7 +85,7 @@ class FingerboardGUI(QMainWindow):
         self.advanced_group.setChecked(False)
         self.advanced_group.toggled.connect(self._toggle_advanced_section)
         advanced_form = QFormLayout(self.advanced_group)
-        for key in ["bottom_layer_thickness", "side_chamfer", "top_bottom_chamfer"]:
+        for key in ["bottom_layer_thickness", "side_chamfer", "top_bottom_chamfer", "groove_factor"]:
             entry = QLineEdit()
             self.advanced_entries[key] = entry
             advanced_form.addRow(QLabel(key), entry)
@@ -161,6 +161,7 @@ class FingerboardGUI(QMainWindow):
             "bottom_layer_thickness": "5.0",
             "side_chamfer": "5.0",
             "top_bottom_chamfer": "2.0",
+            "groove_factor": "0.74",
         }
         self.min_side_margin = 5.0
         self.min_top_margin = 5.0
@@ -280,6 +281,7 @@ class FingerboardGUI(QMainWindow):
             side_chamfer=self._float_value(self.advanced_entries, "side_chamfer"),
             top_bottom_chamfer=self._float_value(self.advanced_entries, "top_bottom_chamfer"),
             cord_hole_diameter=self._float_value(self.global_entries, "cord_hole_diameter"),
+            groove_factor=self._float_value(self.advanced_entries, "groove_factor"),
         )
 
     def _add_coordinate_axes(self, center: np.ndarray, size: float) -> None:
