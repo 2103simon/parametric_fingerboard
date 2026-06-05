@@ -458,7 +458,7 @@ def build_fingerboard(
         body = body.faces("<Z").wires().toPending().edges().chamfer(tb_chamfer)
     
     
-    sattle_penetration = 2.0  # TODO do we need to scale this as well?
+    groove_penetration = 2.0  # TODO do we need to scale this as well?
 
     # UI mapping: "Left Hand" controls left visual side and "Right Hand" right side.
     # Finger slot order is index -> middle -> ring -> pinky for both sides.
@@ -487,7 +487,7 @@ def build_fingerboard(
                 .center(cx, y_center)
                 .box(
                     pocket_width, 
-                    pocket_depth - sattle_penetration, 
+                    pocket_depth - groove_penetration, 
                     pocket_height, 
                     centered=(True, True, True)
                 )
@@ -496,33 +496,33 @@ def build_fingerboard(
             body = body.cut(pocket)
             
             # Sattle for the fingers to rest on the stairs.
-            sattle_scale = params.groove_factor
-            hole_radius = params.hand_span * sattle_scale
-            sattle_offset = hole_radius - sattle_penetration
-            sattle_y = side_sign * (inner_wall_abs + pocket_depth - sattle_offset)
-            sattle_depth = params.edge_depth
+            groove_scale = params.groove_factor
+            hole_radius = params.hand_span * groove_scale
+            groove_offset = hole_radius - groove_penetration
+            groove_y = side_sign * (inner_wall_abs + pocket_depth - groove_offset)
+            groove_depth = params.edge_depth
             
             # Cylindrical groove cutter
             cutter = (
                 cq.Workplane("XY")
-                .center(cx, sattle_y)
+                .center(cx, groove_y)
                 .circle(hole_radius)
-                .extrude(sattle_depth / 2.0, both=True)
+                .extrude(groove_depth / 2.0, both=True)
                 .translate((0.0, 0.0, z_center))
             )
             
             # limiting box to only cut stairs
-            sattle_width = slot_width
-            sattle_length = 2 * sattle_penetration  # local region only
+            groove_width = slot_width
+            groove_length = 2 * groove_penetration  # local region only
             box_y = side_sign * (inner_wall_abs + pocket_depth)
             # Limit region with a box
             limit_box = (
                 cq.Workplane("XY")
                 .center(cx, box_y)
                 .box(
-                    sattle_width,
-                    sattle_length,
-                    sattle_depth,
+                    groove_width,
+                    groove_length,
+                    groove_depth,
                     centered=(True, True, True)
                 )
                 .translate((0, 0, z_center))
