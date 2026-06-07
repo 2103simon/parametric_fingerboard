@@ -73,7 +73,7 @@ class FingerboardParameters:
         side_chamfer (float): Chamfer size for vertical edges.
         top_bottom_chamfer (float): Chamfer size for top/bottom edges.
         cord_hole_diameter (float): Diameter of the cord hole.
-        groove_factor (float): Scaling factor for the finger sattle (groove) radius, relative to hand span.
+        finger_groove_factor (float): Scaling factor for the finger sattle (groove) radius, relative to hand span.
     """
     left: SideParameters
     right: SideParameters
@@ -88,7 +88,7 @@ class FingerboardParameters:
     side_chamfer: float = 5.0
     top_bottom_chamfer: float = 2.0
     cord_hole_diameter: float = 8.0
-    groove_factor: float = 0.74
+    finger_groove_factor: float = 0.74
 
 
 
@@ -204,7 +204,7 @@ def _sanitize_center_bulk_and_cord(
             - cord_hole_diameter: prioritize keeping center_bulk and decrease cord_hole_diameter when needed.
             - auto: same as cord_hole_diameter.
 
-        Returns:
+    Returns:
         tuple[float, float, list[str]]:
             (safe_center_bulk, safe_cord_hole_diameter, warning_messages)
     """
@@ -253,6 +253,34 @@ def _sanitize_center_bulk_and_cord(
         safe_cord = max_height_cord
 
     return safe_center_bulk, safe_cord, warnings
+
+
+def _sanitize_finger_grooves(
+    slot_width: float, 
+    hand_span: float, 
+    finger_groove_factor: float
+) -> tuple[float, list[str]]:
+    """
+    Clamps finger groove parameters to a geometry-safe combination.
+
+    Rules:
+      - finger_groove_factor must result in a groove_cut_radius >= slot_width
+      - groove_cut_radius is calculated as hand_span * finger_groove_factor
+
+    Returns:
+        tuple[float, list[str]]:
+            (safe_groove_cut_radius, warning_messages)
+    """
+    
+    warnings: list[str] = []
+    
+    safe_groove_cut_radius = hand_span * finger_groove_factor
+    if safe_groove_cut_radius < slot_width:
+        warnings.append(
+            f"finger_groove_factor is too large and results in groove_cut_radius {safe_groove_cut_radius:.2f} mm that is smaller than slot width {slot_width:.2f} mm. Clamped to {slot_width:.2f} mm so groove_cut_radius >= hand_span / 4."
+        )
+        safe_groove_cut_radius = slot_width
+    return safe_groove_cut_radius, warnings
 
 
 def _prepare_fingerboard(
@@ -456,9 +484,17 @@ def build_fingerboard(
     if tb_chamfer > 0:
         body = body.faces(">Z").wires().toPending().edges().chamfer(tb_chamfer)
         body = body.faces("<Z").wires().toPending().edges().chamfer(tb_chamfer)
+
+    # let us prepare some parameters for the finger slots and grooves
+    n_slots = 4
+    slot_width = params.hand_span / n_slots
     
-    
-    groove_penetration = 2.0  # TODO do we need to scale this as well?
+    finger_groove_penetration_gain = 2.0/params.hand_span  # TODO move this somewhere else
+    finger_groove_penetration = params.hand_span * finger_groove_penetration_gain
+    safe_finger_groove_cut_radius, finger_groove_warnings = _sanitize_finger_grooves(slot_width, params.hand_span, params.finger_groove_factor)
+    warning_messages.extend(finger_groove_warnings)
+    params.finger_groove_factor = slot_width / safe_finger_groove_cut_radius  
+    finger_groove_offset = safe_finger_groove_cut_radius - finger_groove_penetration
 
     # UI mapping: "Left Hand" controls left visual side and "Right Hand" right side.
     # Finger slot order is index -> middle -> ring -> pinky for both sides.
@@ -467,8 +503,6 @@ def build_fingerboard(
         (1.0, params.left, prepared.left_finger_depths),
     ):
         # The fingerbox region is exactly hand_span wide, centered on the board
-        n_slots = 4
-        slot_width = params.hand_span / n_slots
         left_edge = -0.5 * params.hand_span
         centers_x = [left_edge + (i + 0.5) * slot_width for i in range(n_slots)]
 
@@ -487,7 +521,7 @@ def build_fingerboard(
                 .center(cx, y_center)
                 .box(
                     pocket_width, 
-                    pocket_depth - groove_penetration, 
+                    pocket_depth - finger_groove_penetration, 
                     pocket_height, 
                     centered=(True, True, True)
                 )
@@ -496,24 +530,21 @@ def build_fingerboard(
             body = body.cut(pocket)
             
             # Sattle for the fingers to rest on the stairs.
-            groove_scale = params.groove_factor
-            hole_radius = params.hand_span * groove_scale
-            groove_offset = hole_radius - groove_penetration
-            groove_y = side_sign * (inner_wall_abs + pocket_depth - groove_offset)
+            groove_y = side_sign * (inner_wall_abs + pocket_depth - finger_groove_offset)
             groove_depth = params.edge_depth
             
             # Cylindrical groove cutter
             cutter = (
                 cq.Workplane("XY")
                 .center(cx, groove_y)
-                .circle(hole_radius)
+                .circle(safe_finger_groove_cut_radius)
                 .extrude(groove_depth / 2.0, both=True)
                 .translate((0.0, 0.0, z_center))
             )
             
             # limiting box to only cut stairs
             groove_width = slot_width
-            groove_length = 2 * groove_penetration  # local region only
+            groove_length = 2 * finger_groove_penetration  # local region only
             box_y = side_sign * (inner_wall_abs + pocket_depth)
             # Limit region with a box
             limit_box = (
@@ -535,11 +566,11 @@ def build_fingerboard(
 
     # Single rope hole at the center of the ridge.
     hole_z = board_height / 2.0
-    hole_radius = safe_cord_hole_diameter / 2.0
+    cord_hole_groove_cut_radius = safe_cord_hole_diameter / 2.0
     center_hole = (
         cq.Workplane("YZ")
         .center(0.0, hole_z)
-        .circle(hole_radius)
+        .circle(cord_hole_groove_cut_radius)
         .extrude((board_length / 2.0) + 2.0, both=True)
     )
     body = body.cut(center_hole)
@@ -547,13 +578,13 @@ def build_fingerboard(
     positive_end_groove = (
         cq.Workplane("XZ")
         .center(board_length / 2.0, hole_z)
-        .circle(hole_radius)
+        .circle(cord_hole_groove_cut_radius)
         .extrude((board_width / 2.0) + 2.0, both=True)
     )
     negative_end_groove = (
         cq.Workplane("XZ")
         .center(-(board_length / 2.0), hole_z)
-        .circle(hole_radius)
+        .circle(cord_hole_groove_cut_radius)
         .extrude((board_width / 2.0) + 2.0, both=True)
     )
     body = body.cut(positive_end_groove).cut(negative_end_groove)
