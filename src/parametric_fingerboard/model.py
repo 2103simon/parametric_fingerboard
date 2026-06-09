@@ -277,10 +277,34 @@ def _sanitize_finger_grooves(
     safe_groove_cut_radius = hand_span * finger_groove_factor
     if safe_groove_cut_radius < slot_width:
         warnings.append(
-            f"finger_groove_factor is too large and results in groove_cut_radius {safe_groove_cut_radius:.2f} mm that is smaller than slot width {slot_width:.2f} mm. Clamped to {slot_width:.2f} mm so groove_cut_radius >= hand_span / 4."
+            f"finger_groove_factor is too large and results in groove_cut_radius {safe_groove_cut_radius:.2f} mm that is smaller than slot width {slot_width:.2f} mm. Clamped to {slot_width/hand_span:.2f} mm so groove_cut_radius >= hand_span / 4."
         )
         safe_groove_cut_radius = slot_width
     return safe_groove_cut_radius, warnings
+
+
+def _sanitize_edge_rounding(edge_rounding: float, top_margin: float) -> tuple[float, list[str]]:
+    """
+    Clamps edge rounding parameters to a geometry-safe combination.
+
+    Rules:
+      - edge_rounding must not exceed half of the top_margin
+
+    Returns:
+        tuple[float, list[str]]:
+            (safe_edge_rounding, warning_messages)
+    """
+
+    warnings: list[str] = []
+    
+    safe_edge_rounding = edge_rounding
+    if edge_rounding > (top_margin / 2.0)*0.9:
+        safe_edge_rounding = (top_margin / 2.0)*0.9
+        warnings.append(
+            f"edge_rounding too large and would cut into the top margin. Clamped to {safe_edge_rounding:.2f} mm so edge_rounding <= top_margin / 2."
+        )
+    
+    return safe_edge_rounding, warnings
 
 
 def _prepare_fingerboard(
@@ -365,7 +389,7 @@ def _prepare_fingerboard(
         left_finger_depths=left_finger_depths,
         right_finger_depths=right_finger_depths,
     )
-
+    
 
 def derive_dimensions(params: FingerboardParameters) -> tuple[float, float, float]:
     """
@@ -495,6 +519,9 @@ def build_fingerboard(
     warning_messages.extend(finger_groove_warnings)
     params.finger_groove_factor = slot_width / safe_finger_groove_cut_radius  
     finger_groove_offset = safe_finger_groove_cut_radius - finger_groove_penetration
+    
+    fillet_radius, edge_rounding_warnings = _sanitize_edge_rounding(params.edge_rounding, params.top_margin)  # TODO sanitize fillet radius. Must be < params.top_margin
+    warning_messages.extend(edge_rounding_warnings)
 
     # UI mapping: "Left Hand" controls left visual side and "Right Hand" right side.
     # Finger slot order is index -> middle -> ring -> pinky for both sides.
@@ -563,6 +590,12 @@ def build_fingerboard(
             sattle = cutter.intersect(limit_box)
 
             body = body.cut(sattle)
+
+            # Add a small fillet to the inner edge of the pocket for comfort
+            body = (
+                body.edges("%Circle and >Z")
+                    .fillet(fillet_radius)
+            )
 
     # Single rope hole at the center of the ridge.
     hole_z = board_height / 2.0

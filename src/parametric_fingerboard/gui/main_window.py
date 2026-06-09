@@ -235,7 +235,10 @@ class FingerboardGUI(QMainWindow):
                 match = line.rsplit("Clamped to ", 1)
                 if len(match) == 2:
                     _set_if_changed(self.advanced_entries.get("finger_groove_factor"), match[1].split(" ", 1)[0])
-            # TODO include clamping of finger_groove_factor if implemented in _sanitize_finger_grooves
+            elif line.startswith("edge_rounding "):
+                match = line.rsplit("Clamped to ", 1)
+                if len(match) == 2:
+                    _set_if_changed(self.advanced_entries.get("edge_rounding"), match[1].split(" ", 1)[0])
 
     def _float_value(self, entry_map, key):
         value = float(entry_map[key].text().strip())
@@ -249,7 +252,7 @@ class FingerboardGUI(QMainWindow):
             min_val = getattr(self, "min_top_margin", 0.0)
             if value < min_val:
                 entry_map[key].setText(str(min_val))
-                raise ValueError(f"top_margin must be >= min_side_margin ({min_val})")
+                raise ValueError(f"top_margin must be >= min_top_margin ({min_val})")
             return value
         return value
 
