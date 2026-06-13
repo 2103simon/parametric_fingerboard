@@ -27,7 +27,28 @@ from parametric_fingerboard.model import (
     export_stl,
 )
 
+GLOBAL_PARAMETER_ROWS = (
+    ("hand_span", "Hand span"),
+    ("edge_rounding", "Edge rounding"),
+    ("side_margin", "Side margin"),
+    ("top_margin", "Top margin"),
+    ("center_bulk", "Center bulk"),
+    ("edge_depth", "Edge depth"),
+    ("cord_hole_diameter", "Cord hole diameter"),
+)
 
+ADVANCED_PARAMETER_ROWS = (
+    ("bottom_layer_thickness", "Bottom layer thickness"),
+    ("side_chamfer", "Side chamfer"),
+    ("top_bottom_chamfer", "Top bottom chamfer"),
+    ("finger_groove_factor", "Groove curvature factor"),
+)
+
+SIDE_PARAMETER_ROWS = (
+    ("index_middle", "<span>&Delta; Index Middle</span>"),
+    ("middle_ring", "<span>&Delta; Middle Ring</span>"),
+    ("ring_pinky", "<span>&Delta; Ring Pinky</span>"),
+)
 
 class FingerboardGUI(QMainWindow):
     def __init__(self):
@@ -73,10 +94,10 @@ class FingerboardGUI(QMainWindow):
         # Global parameters
         global_group = QGroupBox("Global Parameters")
         global_form = QFormLayout(global_group)
-        for key in ["hand_span", "edge_rounding", "side_margin", "top_margin", "center_bulk", "edge_depth", "cord_hole_diameter"]:
+        for key, label_text in GLOBAL_PARAMETER_ROWS:
             entry = QLineEdit()
             self.global_entries[key] = entry
-            global_form.addRow(QLabel(key), entry)
+            global_form.addRow(QLabel(label_text), entry)
         controls_layout.addWidget(global_group)
 
         # Advanced parameters (collapsible)
@@ -85,10 +106,10 @@ class FingerboardGUI(QMainWindow):
         self.advanced_group.setChecked(False)
         self.advanced_group.toggled.connect(self._toggle_advanced_section)
         advanced_form = QFormLayout(self.advanced_group)
-        for key in ["bottom_layer_thickness", "side_chamfer", "top_bottom_chamfer", "finger_groove_factor"]:
+        for key, label_text in ADVANCED_PARAMETER_ROWS:
             entry = QLineEdit()
             self.advanced_entries[key] = entry
-            advanced_form.addRow(QLabel(key), entry)
+            advanced_form.addRow(QLabel(label_text), entry)
         controls_layout.addWidget(self.advanced_group)
 
         # Hand parameters
@@ -96,16 +117,16 @@ class FingerboardGUI(QMainWindow):
         hands_layout = QHBoxLayout(hands_group)
         right_group = QGroupBox("Right Hand")
         right_form = QFormLayout(right_group)
-        for key in ["index_middle", "middle_ring", "ring_pinky"]:
+        for key, label_text in SIDE_PARAMETER_ROWS:
             entry = QLineEdit()
             self.right_entries[key] = entry
-            right_form.addRow(QLabel(key), entry)
+            right_form.addRow(QLabel(label_text), entry)
         left_group = QGroupBox("Left Hand")
         left_form = QFormLayout(left_group)
-        for key in ["index_middle", "middle_ring", "ring_pinky"]:
+        for key, label_text in SIDE_PARAMETER_ROWS:
             entry = QLineEdit()
             self.left_entries[key] = entry
-            left_form.addRow(QLabel(key), entry)
+            left_form.addRow(QLabel(label_text), entry)
         hands_layout.addWidget(right_group)
         hands_layout.addWidget(left_group)
         controls_layout.addWidget(hands_group)
@@ -149,13 +170,13 @@ class FingerboardGUI(QMainWindow):
 
     def _set_defaults(self):
         defaults = {
-            "hand_span": "68",
-            "edge_rounding": "2.5",
-            "side_margin": "8",
-            "top_margin": "8",
-            "center_bulk": "15",
-            "edge_depth": "20",
-            "cord_hole_diameter": "8",
+            "hand_span": "68.0",
+            "edge_rounding": "2.0",
+            "side_margin": "8.0",
+            "top_margin": "8.0",
+            "center_bulk": "15.0",
+            "edge_depth": "20.0",
+            "cord_hole_diameter": "8.0",
         }
         advanced_defaults = {
             "bottom_layer_thickness": "5.0",
@@ -238,7 +259,7 @@ class FingerboardGUI(QMainWindow):
             elif line.startswith("edge_rounding "):
                 match = line.rsplit("Clamped to ", 1)
                 if len(match) == 2:
-                    _set_if_changed(self.advanced_entries.get("edge_rounding"), match[1].split(" ", 1)[0])
+                    _set_if_changed(self.global_entries.get("edge_rounding"), match[1].split(" ", 1)[0])
 
     def _float_value(self, entry_map, key):
         value = float(entry_map[key].text().strip())
