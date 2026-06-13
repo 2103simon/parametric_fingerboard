@@ -50,6 +50,102 @@ SIDE_PARAMETER_ROWS = (
     ("ring_pinky", "<span>&Delta; Ring Pinky</span>"),
 )
 
+PARAMETER_TOOLTIPS = {
+    "hand_span": (
+        "<b>Hand span</b><br>"
+        "Distance from index to pinky across one hand.<br>"
+        "The fingerbox is split into four equal slots:<br>"
+        "<i>w</i><sub>slot</sub> = <i>s</i><sub>hand</sub> / 4."
+    ),
+    "edge_rounding": (
+        "<b>Edge rounding</b><br>"
+        "Radius of the comfort fillet on the inner top edge of each fingerbox.<br>"
+        "Clamped by the top margin:<br>"
+        "<i>r</i><sub>edge</sub> &le; 0.9 &times; <i>m</i><sub>top</sub> / 2."
+    ),
+    "side_margin": (
+        "<b>Side margin</b><br>"
+        "Extra material outside the finger slots along the board length.<br>"
+        "<i>L</i><sub>board</sub> = <i>s</i><sub>hand</sub> + "
+        "2 &times; <i>m</i><sub>side</sub>."
+    ),
+    "top_margin": (
+        "<b>Top margin</b><br>"
+        "Extra material beyond the finger pockets in the board width direction.<br>"
+        "Also limits safe edge rounding and chamfers:<br>"
+        "<i>m</i><sub>clear</sub> = min(<i>m</i><sub>top</sub>, "
+        "<i>m</i><sub>side</sub>)."
+    ),
+    "center_bulk": (
+        "<b>Center bulk</b><br>"
+        "Width of the solid central ridge between the left and right hand pockets.<br>"
+        "The cord hole must fit with clearance:<br>"
+        "<i>d</i><sub>cord</sub> &le; <i>b</i><sub>center</sub> - 2 mm."
+    ),
+    "edge_depth": (
+        "<b>Edge depth</b><br>"
+        "Vertical depth of the finger pockets above the bottom layer.<br>"
+        "<i>h</i><sub>board</sub> = <i>t</i><sub>bottom</sub> + "
+        "<i>d</i><sub>edge</sub>."
+    ),
+    "cord_hole_diameter": (
+        "<b>Cord hole diameter</b><br>"
+        "Diameter of the central through-hole for the cord.<br>"
+        "Clamped to fit inside the ridge and board height:<br>"
+        "<i>d</i><sub>cord</sub> &le; min(<i>b</i><sub>center</sub> - 2 mm, "
+        "<i>h</i><sub>board</sub>)."
+    ),
+    "bottom_layer_thickness": (
+        "<b>Bottom layer thickness</b><br>"
+        "Solid material left below the finger pockets.<br>"
+        "Together with edge depth, it sets total height:<br>"
+        "<i>h</i><sub>board</sub> = <i>t</i><sub>bottom</sub> + "
+        "<i>d</i><sub>edge</sub>."
+    ),
+    "side_chamfer": (
+        "<b>Side chamfer</b><br>"
+        "Bevel size for the outside vertical edges of the board.<br>"
+        "Clamped by available clearance:<br>"
+        "<i>c</i><sub>side</sub> &le; 5/6 &times; "
+        "min(<i>m</i><sub>top</sub>, <i>m</i><sub>side</sub>)."
+    ),
+    "top_bottom_chamfer": (
+        "<b>Top bottom chamfer</b><br>"
+        "Bevel size for the outside top and bottom perimeter edges.<br>"
+        "Clamped so it stays away from the fingerbox:<br>"
+        "<i>c</i><sub>top/bottom</sub> &le; 5/6 &times; "
+        "min(<i>m</i><sub>top</sub>, <i>m</i><sub>side</sub>)."
+    ),
+    "finger_groove_factor": (
+        "<b>Groove curvature factor</b><br>"
+        "Controls the cylindrical radius used for the finger saddle groove.<br>"
+        "<i>r</i><sub>groove</sub> = <i>s</i><sub>hand</sub> &times; "
+        "<i>f</i><sub>groove</sub>.<br>"
+        "Minimum safe value:<br>"
+        "<i>f</i><sub>groove</sub> &ge; "
+        "<i>w</i><sub>slot</sub> / <i>s</i><sub>hand</sub> = 0.25."
+    ),
+    "index_middle": (
+        "<b>&Delta; Index Middle</b><br>"
+        "Height difference between index and middle finger.<br>"
+        "The model uses the absolute value:<br>"
+        "&Delta;<sub>index,middle</sub> = |index_middle|."
+    ),
+    "middle_ring": (
+        "<b>&Delta; Middle Ring</b><br>"
+        "Height difference between middle and ring finger.<br>"
+        "The model uses the absolute value:<br>"
+        "&Delta;<sub>middle,ring</sub> = |middle_ring|."
+    ),
+    "ring_pinky": (
+        "<b>&Delta; Ring Pinky</b><br>"
+        "Height difference between ring and pinky finger.<br>"
+        "The model uses the absolute value:<br>"
+        "&Delta;<sub>ring,pinky</sub> = |ring_pinky|."
+    ),
+}
+
+
 class FingerboardGUI(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -79,6 +175,15 @@ class FingerboardGUI(QMainWindow):
         self._build_layout()
         self._set_defaults()
 
+    def _parameter_label(self, key: str, label_text: str, entry: QLineEdit) -> QLabel:
+        label = QLabel(label_text)
+        tooltip = PARAMETER_TOOLTIPS.get(key)
+        if tooltip:
+            rich_tooltip = f"<html><body>{tooltip}</body></html>"
+            label.setToolTip(rich_tooltip)
+            entry.setToolTip(rich_tooltip)
+        return label
+
     def _build_layout(self):
         main_widget = QWidget()
         self.setCentralWidget(main_widget)
@@ -97,7 +202,7 @@ class FingerboardGUI(QMainWindow):
         for key, label_text in GLOBAL_PARAMETER_ROWS:
             entry = QLineEdit()
             self.global_entries[key] = entry
-            global_form.addRow(QLabel(label_text), entry)
+            global_form.addRow(self._parameter_label(key, label_text, entry), entry)
         controls_layout.addWidget(global_group)
 
         # Advanced parameters (collapsible)
@@ -109,7 +214,7 @@ class FingerboardGUI(QMainWindow):
         for key, label_text in ADVANCED_PARAMETER_ROWS:
             entry = QLineEdit()
             self.advanced_entries[key] = entry
-            advanced_form.addRow(QLabel(label_text), entry)
+            advanced_form.addRow(self._parameter_label(key, label_text, entry), entry)
         controls_layout.addWidget(self.advanced_group)
 
         # Hand parameters
@@ -120,13 +225,13 @@ class FingerboardGUI(QMainWindow):
         for key, label_text in SIDE_PARAMETER_ROWS:
             entry = QLineEdit()
             self.right_entries[key] = entry
-            right_form.addRow(QLabel(label_text), entry)
+            right_form.addRow(self._parameter_label(key, label_text, entry), entry)
         left_group = QGroupBox("Left Hand")
         left_form = QFormLayout(left_group)
         for key, label_text in SIDE_PARAMETER_ROWS:
             entry = QLineEdit()
             self.left_entries[key] = entry
-            left_form.addRow(QLabel(label_text), entry)
+            left_form.addRow(self._parameter_label(key, label_text, entry), entry)
         hands_layout.addWidget(right_group)
         hands_layout.addWidget(left_group)
         controls_layout.addWidget(hands_group)
