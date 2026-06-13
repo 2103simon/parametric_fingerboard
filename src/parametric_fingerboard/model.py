@@ -259,7 +259,7 @@ def _sanitize_finger_grooves(
     slot_width: float, 
     hand_span: float, 
     finger_groove_factor: float
-) -> tuple[float, list[str]]:
+) -> tuple[float, float, list[str]]:
     """
     Clamps finger groove parameters to a geometry-safe combination.
 
@@ -268,19 +268,21 @@ def _sanitize_finger_grooves(
       - groove_cut_radius is calculated as hand_span * finger_groove_factor
 
     Returns:
-        tuple[float, list[str]]:
-            (safe_groove_cut_radius, warning_messages)
+        tuple[float, float, list[str]]:
+            (safe_groove_cut_radius, safe_finger_groove_factor, warning_messages)
     """
     
     warnings: list[str] = []
     
     safe_groove_cut_radius = hand_span * finger_groove_factor
+    safe_finger_groove_factor = finger_groove_factor
     if safe_groove_cut_radius < slot_width:
+        safe_finger_groove_factor = slot_width / hand_span
         warnings.append(
-            f"finger_groove_factor is too large and results in groove_cut_radius {safe_groove_cut_radius:.2f} mm that is smaller than slot width {slot_width:.2f} mm. Clamped to {slot_width/hand_span:.2f} mm so groove_cut_radius >= hand_span / 4."
+            f"finger_groove_factor is too small and results in groove_cut_radius {safe_groove_cut_radius:.2f} mm that is smaller than slot width {slot_width:.2f} mm. Clamped to {safe_finger_groove_factor:.2f} so groove_cut_radius >= slot_width."
         )
         safe_groove_cut_radius = slot_width
-    return safe_groove_cut_radius, warnings
+    return safe_groove_cut_radius, safe_finger_groove_factor, warnings
 
 
 def _sanitize_edge_rounding(edge_rounding: float, top_margin: float) -> tuple[float, list[str]]:
@@ -500,14 +502,6 @@ def build_fingerboard(
         board_height,
         centered=(True, True, False),
     ).translate((0.0, body_center_y, 0.0))
-    # Apply side_chamfer to all vertical (|Z) edges if nonzero
-    if side_chamfer > 0:
-        body = body.edges("|Z").chamfer(side_chamfer)
-
-    # Apply top_bottom_chamfer only to the outer perimeter edges of the top and bottom faces if nonzero
-    if tb_chamfer > 0:
-        body = body.faces(">Z").wires().toPending().edges().chamfer(tb_chamfer)
-        body = body.faces("<Z").wires().toPending().edges().chamfer(tb_chamfer)
 
     # let us prepare some parameters for the finger slots and grooves
     n_slots = 4
@@ -515,13 +509,13 @@ def build_fingerboard(
     
     finger_groove_penetration_gain = 2.0/params.hand_span  # TODO move this somewhere else
     finger_groove_penetration = params.hand_span * finger_groove_penetration_gain
-    safe_finger_groove_cut_radius, finger_groove_warnings = _sanitize_finger_grooves(slot_width, params.hand_span, params.finger_groove_factor)
+    safe_finger_groove_cut_radius, _, finger_groove_warnings = _sanitize_finger_grooves(slot_width, params.hand_span, params.finger_groove_factor)
     warning_messages.extend(finger_groove_warnings)
-    params.finger_groove_factor = slot_width / safe_finger_groove_cut_radius  
     finger_groove_offset = safe_finger_groove_cut_radius - finger_groove_penetration
     
     fillet_radius, edge_rounding_warnings = _sanitize_edge_rounding(params.edge_rounding, params.top_margin)  # TODO sanitize fillet radius. Must be < params.top_margin
     warning_messages.extend(edge_rounding_warnings)
+    fingerbox_rounding_regions: list[tuple[float, float, float, float]] = []
 
     # UI mapping: "Left Hand" controls left visual side and "Right Hand" right side.
     # Finger slot order is index -> middle -> ring -> pinky for both sides.
@@ -585,17 +579,89 @@ def build_fingerboard(
                 )
                 .translate((0, 0, z_center))
             )
+            fingerbox_rounding_regions.append((
+                cx - (groove_width / 2.0),
+                cx + (groove_width / 2.0),
+                min(box_y - (groove_length / 2.0), box_y + (groove_length / 2.0)),
+                max(box_y - (groove_length / 2.0), box_y + (groove_length / 2.0)),
+            ))
 
             # Keep only intersecting region
             sattle = cutter.intersect(limit_box)
 
             body = body.cut(sattle)
 
-            # Add a small fillet to the inner edge of the pocket for comfort
-            body = (
-                body.edges("%Circle and >Z")
-                    .fillet(fillet_radius)
-            )
+    # Add a small fillet to the inner edge of each fingerbox for comfort. The
+    # stored regions keep this from catching unrelated circular edges.
+    if fillet_radius > 0:
+        rounding_tolerance = 1e-4
+        fingerbox_rounding_edges = []
+        for edge in body.edges("%Circle and >Z").vals():
+            edge_bbox = edge.BoundingBox()
+            edge_center = edge.Center()
+            for x_min, x_max, y_min, y_max in fingerbox_rounding_regions:
+                bbox_in_region = (
+                    edge_bbox.xmin >= x_min - rounding_tolerance
+                    and edge_bbox.xmax <= x_max + rounding_tolerance
+                    and edge_bbox.ymin >= y_min - rounding_tolerance
+                    and edge_bbox.ymax <= y_max + rounding_tolerance
+                )
+                center_in_region = (
+                    x_min - rounding_tolerance <= edge_center.x <= x_max + rounding_tolerance
+                    and y_min - rounding_tolerance <= edge_center.y <= y_max + rounding_tolerance
+                )
+                if bbox_in_region or center_in_region:
+                    fingerbox_rounding_edges.append(edge)
+                    break
+        if fingerbox_rounding_edges:
+            body = body.newObject(fingerbox_rounding_edges).fillet(fillet_radius)
+
+    body_x_min = -(board_length / 2.0)
+    body_x_max = board_length / 2.0
+    body_y_min = body_center_y - (board_width / 2.0)
+    body_y_max = body_center_y + (board_width / 2.0)
+    outer_edge_tolerance = 1e-4
+
+    def _near(value: float, target: float) -> bool:
+        return abs(value - target) <= outer_edge_tolerance
+
+    def _bbox_on_x_boundary(bbox) -> bool:
+        return (
+            (_near(bbox.xmin, body_x_min) and _near(bbox.xmax, body_x_min))
+            or (_near(bbox.xmin, body_x_max) and _near(bbox.xmax, body_x_max))
+        )
+
+    def _bbox_on_y_boundary(bbox) -> bool:
+        return (
+            (_near(bbox.ymin, body_y_min) and _near(bbox.ymax, body_y_min))
+            or (_near(bbox.ymin, body_y_max) and _near(bbox.ymax, body_y_max))
+        )
+
+    # Apply side_chamfer late, but only to the four original outer vertical edges.
+    if side_chamfer > 0:
+        side_chamfer_edges = []
+        for edge in body.edges("|Z").vals():
+            edge_bbox = edge.BoundingBox()
+            if _bbox_on_x_boundary(edge_bbox) and _bbox_on_y_boundary(edge_bbox):
+                side_chamfer_edges.append(edge)
+        if side_chamfer_edges:
+            body = body.newObject(side_chamfer_edges).chamfer(side_chamfer)
+
+    # Apply top_bottom_chamfer late, keeping it on the exterior perimeter only.
+    if tb_chamfer > 0:
+        top_bottom_chamfer_edges = []
+        for face_selector in (">Z", "<Z"):
+            for edge in body.faces(face_selector).wires().toPending().edges().vals():
+                edge_bbox = edge.BoundingBox()
+                if (
+                    _near(edge_bbox.xmin, body_x_min)
+                    or _near(edge_bbox.xmax, body_x_max)
+                    or _near(edge_bbox.ymin, body_y_min)
+                    or _near(edge_bbox.ymax, body_y_max)
+                ):
+                    top_bottom_chamfer_edges.append(edge)
+        if top_bottom_chamfer_edges:
+            body = body.newObject(top_bottom_chamfer_edges).chamfer(tb_chamfer)
 
     # Single rope hole at the center of the ridge.
     hole_z = board_height / 2.0
