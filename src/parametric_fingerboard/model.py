@@ -40,6 +40,7 @@ from cadquery import exporters
 FINGER_ORDER = ("index", "middle", "ring", "pinky")
 CORD_HOLE_TOP_LAYER_CLEARANCE = 2.0
 MIN_EFFECTIVE_CHAMFER = 0.001
+FINGER_GROOVE_MAX_FACTOR = 10.0
 # OCCT fails the second chamfer when the side bevel is too small to meet the
 # top/bottom bevel at the corner. This is the observed geometric threshold.
 SIDE_TOP_CHAMFER_MIN_RATIO = 2.0 - math.sqrt(2.0)
@@ -275,7 +276,9 @@ def _sanitize_finger_grooves(
     Clamps finger groove parameters to a geometry-safe combination.
 
     Rules:
+      - finger_groove_factor == 0 disables finger grooves
       - finger_groove_factor must result in a groove_cut_radius >= slot_width
+      - finger_groove_factor is capped to avoid unstable large-radius CAD cuts
       - groove_cut_radius is calculated as hand_span * finger_groove_factor
 
     Returns:
@@ -284,6 +287,23 @@ def _sanitize_finger_grooves(
     """
     
     warnings: list[str] = []
+
+    if not math.isfinite(finger_groove_factor):
+        warnings.append(
+            "finger_groove_factor must be a finite number. "
+            f"Clamped to {FINGER_GROOVE_MAX_FACTOR:.2f} so the model can be created."
+        )
+        finger_groove_factor = FINGER_GROOVE_MAX_FACTOR
+
+    if finger_groove_factor < 0.0:
+        warnings.append(
+            "finger_groove_factor cannot be negative. "
+            "Clamped to 0.00 and finger grooves were disabled."
+        )
+        return 0.0, 0.0, warnings
+
+    if finger_groove_factor == 0.0:
+        return 0.0, 0.0, warnings
     
     safe_groove_cut_radius = hand_span * finger_groove_factor
     safe_finger_groove_factor = finger_groove_factor
@@ -293,6 +313,13 @@ def _sanitize_finger_grooves(
             f"finger_groove_factor is too small and results in groove_cut_radius {safe_groove_cut_radius:.2f} mm that is smaller than slot width {slot_width:.2f} mm. Clamped to {safe_finger_groove_factor:.2f} so groove_cut_radius >= slot_width."
         )
         safe_groove_cut_radius = slot_width
+    if safe_finger_groove_factor > FINGER_GROOVE_MAX_FACTOR:
+        safe_finger_groove_factor = FINGER_GROOVE_MAX_FACTOR
+        safe_groove_cut_radius = hand_span * safe_finger_groove_factor
+        warnings.append(
+            f"finger_groove_factor too large for stable CAD geometry. "
+            f"Clamped to {safe_finger_groove_factor:.2f} so the model can be created."
+        )
     return safe_groove_cut_radius, safe_finger_groove_factor, warnings
 
 
@@ -588,10 +615,10 @@ def build_fingerboard(
     n_slots = 4
     slot_width = params.hand_span / n_slots
     
-    finger_groove_penetration_gain = 2.0/params.hand_span  # TODO move this somewhere else
-    finger_groove_penetration = params.hand_span * finger_groove_penetration_gain
     safe_finger_groove_cut_radius, _, finger_groove_warnings = _sanitize_finger_grooves(slot_width, params.hand_span, params.finger_groove_factor)
     warning_messages.extend(finger_groove_warnings)
+    finger_groove_enabled = safe_finger_groove_cut_radius > 0.0
+    finger_groove_penetration = 2.0 if finger_groove_enabled else 0.0
     finger_groove_offset = safe_finger_groove_cut_radius - finger_groove_penetration
     
     fillet_radius, edge_rounding_warnings = _sanitize_edge_rounding(params.edge_rounding, params.top_margin)  # TODO sanitize fillet radius. Must be < params.top_margin
@@ -631,46 +658,47 @@ def build_fingerboard(
             )
             body = body.cut(pocket)
             
-            # Sattle for the fingers to rest on the stairs.
-            groove_y = side_sign * (inner_wall_abs + pocket_depth - finger_groove_offset)
-            groove_depth = params.edge_depth
-            
-            # Cylindrical groove cutter
-            cutter = (
-                cq.Workplane("XY")
-                .center(cx, groove_y)
-                .circle(safe_finger_groove_cut_radius)
-                .extrude(groove_depth / 2.0, both=True)
-                .translate((0.0, 0.0, z_center))
-            )
-            
-            # limiting box to only cut stairs
-            groove_width = slot_width
-            groove_length = 2 * finger_groove_penetration  # local region only
-            box_y = side_sign * (inner_wall_abs + pocket_depth)
-            # Limit region with a box
-            limit_box = (
-                cq.Workplane("XY")
-                .center(cx, box_y)
-                .box(
-                    groove_width,
-                    groove_length,
-                    groove_depth,
-                    centered=(True, True, True)
+            if finger_groove_enabled:
+                # Sattle for the fingers to rest on the stairs.
+                groove_y = side_sign * (inner_wall_abs + pocket_depth - finger_groove_offset)
+                groove_depth = params.edge_depth
+
+                # Cylindrical groove cutter
+                cutter = (
+                    cq.Workplane("XY")
+                    .center(cx, groove_y)
+                    .circle(safe_finger_groove_cut_radius)
+                    .extrude(groove_depth / 2.0, both=True)
+                    .translate((0.0, 0.0, z_center))
                 )
-                .translate((0, 0, z_center))
-            )
-            fingerbox_rounding_regions.append((
-                cx - (groove_width / 2.0),
-                cx + (groove_width / 2.0),
-                min(box_y - (groove_length / 2.0), box_y + (groove_length / 2.0)),
-                max(box_y - (groove_length / 2.0), box_y + (groove_length / 2.0)),
-            ))
 
-            # Keep only intersecting region
-            sattle = cutter.intersect(limit_box)
+                # limiting box to only cut stairs
+                groove_width = slot_width
+                groove_length = 2 * finger_groove_penetration  # local region only
+                box_y = side_sign * (inner_wall_abs + pocket_depth)
+                # Limit region with a box
+                limit_box = (
+                    cq.Workplane("XY")
+                    .center(cx, box_y)
+                    .box(
+                        groove_width,
+                        groove_length,
+                        groove_depth,
+                        centered=(True, True, True)
+                    )
+                    .translate((0, 0, z_center))
+                )
+                fingerbox_rounding_regions.append((
+                    cx - (groove_width / 2.0),
+                    cx + (groove_width / 2.0),
+                    min(box_y - (groove_length / 2.0), box_y + (groove_length / 2.0)),
+                    max(box_y - (groove_length / 2.0), box_y + (groove_length / 2.0)),
+                ))
 
-            body = body.cut(sattle)
+                # Keep only intersecting region
+                sattle = cutter.intersect(limit_box)
+
+                body = body.cut(sattle)
 
     body_x_min = -(board_length / 2.0)
     body_x_max = board_length / 2.0

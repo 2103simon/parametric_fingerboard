@@ -22,6 +22,7 @@ from parametric_fingerboard.model import (
     FingerboardParameters,
     SideParameters,
     ExportType,
+    FINGER_GROOVE_MAX_FACTOR,
     build_fingerboard,
     _prepare_fingerboard,
     export_stl,
@@ -121,9 +122,12 @@ PARAMETER_TOOLTIPS = {
         "Controls the cylindrical radius used for the finger saddle groove.<br>"
         "<i>r</i><sub>groove</sub> = <i>s</i><sub>hand</sub> &times; "
         "<i>f</i><sub>groove</sub>.<br>"
+        "Use 0 to disable finger grooves.<br>"
         "Minimum safe value:<br>"
         "<i>f</i><sub>groove</sub> &ge; "
-        "<i>w</i><sub>slot</sub> / <i>s</i><sub>hand</sub> = 0.25."
+        "<i>w</i><sub>slot</sub> / <i>s</i><sub>hand</sub> = 0.25.<br>"
+        f"Very large values are clamped to {FINGER_GROOVE_MAX_FACTOR:g} "
+        "for stable CAD generation."
     ),
     "index_middle": (
         "<b>&Delta; Index Middle</b><br>"
