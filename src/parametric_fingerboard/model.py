@@ -663,28 +663,44 @@ def build_fingerboard(
         if top_bottom_chamfer_edges:
             body = body.newObject(top_bottom_chamfer_edges).chamfer(tb_chamfer)
 
+    body_bbox = body.val().BoundingBox()
+    rope_cut_clearance = 2.0
+
     # Single rope hole at the center of the ridge.
-    hole_z = board_height / 2.0
+    hole_z = (body_bbox.zmin + body_bbox.zmax) / 2.0
     cord_hole_groove_cut_radius = safe_cord_hole_diameter / 2.0
+    center_hole_center_x = (body_bbox.xmin + body_bbox.xmax) / 2.0
+    center_hole_half_length = (
+        ((body_bbox.xmax - body_bbox.xmin) / 2.0)
+        + rope_cut_clearance
+    )
     center_hole = (
         cq.Workplane("YZ")
         .center(0.0, hole_z)
         .circle(cord_hole_groove_cut_radius)
-        .extrude((board_length / 2.0) + 2.0, both=True)
+        .extrude(center_hole_half_length, both=True)
+        .translate((center_hole_center_x, 0.0, 0.0))
     )
     body = body.cut(center_hole)
 
+    end_groove_center_y = (body_bbox.ymin + body_bbox.ymax) / 2.0
+    end_groove_half_width = (
+        ((body_bbox.ymax - body_bbox.ymin) / 2.0)
+        + rope_cut_clearance
+    )
     positive_end_groove = (
         cq.Workplane("XZ")
-        .center(board_length / 2.0, hole_z)
+        .center(body_bbox.xmax, hole_z)
         .circle(cord_hole_groove_cut_radius)
-        .extrude((board_width / 2.0) + 2.0, both=True)
+        .extrude(end_groove_half_width, both=True)
+        .translate((0.0, end_groove_center_y, 0.0))
     )
     negative_end_groove = (
         cq.Workplane("XZ")
-        .center(-(board_length / 2.0), hole_z)
+        .center(body_bbox.xmin, hole_z)
         .circle(cord_hole_groove_cut_radius)
-        .extrude((board_width / 2.0) + 2.0, both=True)
+        .extrude(end_groove_half_width, both=True)
+        .translate((0.0, end_groove_center_y, 0.0))
     )
     body = body.cut(positive_end_groove).cut(negative_end_groove)
 
