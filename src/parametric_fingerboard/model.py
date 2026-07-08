@@ -37,6 +37,7 @@ import cadquery as cq
 from cadquery import exporters
 
 FINGER_ORDER = ("index", "middle", "ring", "pinky")
+CORD_HOLE_TOP_LAYER_CLEARANCE = 2.0
 ExportType = Literal["STL", "STEP", "AMF", "SVG", "TJS", "DXF", "VRML", "VTP", "3MF", "BREP", "BIN"]
 
 
@@ -307,6 +308,37 @@ def _sanitize_edge_rounding(edge_rounding: float, top_margin: float) -> tuple[fl
         )
     
     return safe_edge_rounding, warnings
+
+
+def _cord_hole_stair_center_z(
+    bottom_layer_thickness: float,
+    edge_depth: float,
+    board_height: float,
+    cord_hole_diameter: float,
+) -> tuple[float, list[str]]:
+    """
+    Places the cord hole at the stair center while preserving top-layer material.
+
+    The preferred center is halfway up the stair depth above the bottom layer:
+    bottom_layer_thickness + edge_depth / 2.
+    The top-layer clearance is measured from the top edge of the circular hole:
+    hole_center_z + cord_hole_diameter / 2 <= board_height - clearance.
+    """
+    warnings: list[str] = []
+    preferred_hole_z = bottom_layer_thickness + (edge_depth / 2.0)
+    cord_hole_radius = cord_hole_diameter / 2.0
+    max_hole_center_z = board_height - CORD_HOLE_TOP_LAYER_CLEARANCE - cord_hole_radius
+
+    if preferred_hole_z > max_hole_center_z:
+        warnings.append(
+            f"cord hole placement too close to the top layer. "
+            f"Lowered hole center to {max_hole_center_z:.2f} mm so the "
+            f"{cord_hole_diameter:.2f} mm hole leaves at least "
+            f"{CORD_HOLE_TOP_LAYER_CLEARANCE:.2f} mm of material above it."
+        )
+        return max_hole_center_z, warnings
+
+    return preferred_hole_z, warnings
 
 
 def _prepare_fingerboard(
@@ -591,31 +623,6 @@ def build_fingerboard(
 
             body = body.cut(sattle)
 
-    # Add a small fillet to the inner edge of each fingerbox for comfort. The
-    # stored regions keep this from catching unrelated circular edges.
-    if fillet_radius > 0:
-        rounding_tolerance = 1e-4
-        fingerbox_rounding_edges = []
-        for edge in body.edges("%Circle and >Z").vals():
-            edge_bbox = edge.BoundingBox()
-            edge_center = edge.Center()
-            for x_min, x_max, y_min, y_max in fingerbox_rounding_regions:
-                bbox_in_region = (
-                    edge_bbox.xmin >= x_min - rounding_tolerance
-                    and edge_bbox.xmax <= x_max + rounding_tolerance
-                    and edge_bbox.ymin >= y_min - rounding_tolerance
-                    and edge_bbox.ymax <= y_max + rounding_tolerance
-                )
-                center_in_region = (
-                    x_min - rounding_tolerance <= edge_center.x <= x_max + rounding_tolerance
-                    and y_min - rounding_tolerance <= edge_center.y <= y_max + rounding_tolerance
-                )
-                if bbox_in_region or center_in_region:
-                    fingerbox_rounding_edges.append(edge)
-                    break
-        if fingerbox_rounding_edges:
-            body = body.newObject(fingerbox_rounding_edges).fillet(fillet_radius)
-
     body_x_min = -(board_length / 2.0)
     body_x_max = board_length / 2.0
     body_y_min = body_center_y - (board_width / 2.0)
@@ -637,38 +644,118 @@ def build_fingerboard(
             or (_near(bbox.ymin, body_y_max) and _near(bbox.ymax, body_y_max))
         )
 
-    # Apply side_chamfer late, but only to the four original outer vertical edges.
-    if side_chamfer > 0:
-        side_chamfer_edges = []
-        for edge in body.edges("|Z").vals():
-            edge_bbox = edge.BoundingBox()
-            if _bbox_on_x_boundary(edge_bbox) and _bbox_on_y_boundary(edge_bbox):
-                side_chamfer_edges.append(edge)
-        if side_chamfer_edges:
-            body = body.newObject(side_chamfer_edges).chamfer(side_chamfer)
+    def _edge_rounding_candidates(requested_radius: float) -> list[float]:
+        """Returns fallback radii for fragile CadQuery fillets."""
+        if requested_radius <= 0:
+            return [0.0]
 
-    # Apply top_bottom_chamfer late, keeping it on the exterior perimeter only.
-    if tb_chamfer > 0:
-        top_bottom_chamfer_edges = []
-        for face_selector in (">Z", "<Z"):
-            for edge in body.faces(face_selector).wires().toPending().edges().vals():
+        conservative_limits = [
+            requested_radius,
+            params.edge_depth * 0.85,
+            max(0.0, params.top_margin - finger_groove_penetration) * 0.5,
+            finger_groove_penetration * 0.75,
+            finger_groove_penetration * 0.5,
+            0.5,
+            0.0,
+        ]
+        candidates: list[float] = []
+        for limit in conservative_limits:
+            candidate = max(0.0, min(requested_radius, limit))
+            if not any(abs(candidate - existing) < 1e-9 for existing in candidates):
+                candidates.append(candidate)
+        return candidates
+
+    def _apply_fingerbox_rounding(source_body: cq.Workplane, radius: float) -> cq.Workplane:
+        # Add a small fillet to the inner edge of each fingerbox for comfort. The
+        # stored regions keep this from catching unrelated circular edges.
+        if radius <= 0:
+            return source_body
+
+        rounding_tolerance = 1e-4
+        fingerbox_rounding_edges = []
+        for edge in source_body.edges("%Circle and >Z").vals():
+            edge_bbox = edge.BoundingBox()
+            edge_center = edge.Center()
+            for x_min, x_max, y_min, y_max in fingerbox_rounding_regions:
+                bbox_in_region = (
+                    edge_bbox.xmin >= x_min - rounding_tolerance
+                    and edge_bbox.xmax <= x_max + rounding_tolerance
+                    and edge_bbox.ymin >= y_min - rounding_tolerance
+                    and edge_bbox.ymax <= y_max + rounding_tolerance
+                )
+                center_in_region = (
+                    x_min - rounding_tolerance <= edge_center.x <= x_max + rounding_tolerance
+                    and y_min - rounding_tolerance <= edge_center.y <= y_max + rounding_tolerance
+                )
+                if bbox_in_region or center_in_region:
+                    fingerbox_rounding_edges.append(edge)
+                    break
+        if not fingerbox_rounding_edges:
+            return source_body
+        return source_body.newObject(fingerbox_rounding_edges).fillet(radius)
+
+    def _apply_outer_chamfers(source_body: cq.Workplane) -> cq.Workplane:
+        result = source_body
+
+        # Apply side_chamfer late, but only to the four original outer vertical edges.
+        if side_chamfer > 0:
+            side_chamfer_edges = []
+            for edge in result.edges("|Z").vals():
                 edge_bbox = edge.BoundingBox()
-                if (
-                    _near(edge_bbox.xmin, body_x_min)
-                    or _near(edge_bbox.xmax, body_x_max)
-                    or _near(edge_bbox.ymin, body_y_min)
-                    or _near(edge_bbox.ymax, body_y_max)
-                ):
-                    top_bottom_chamfer_edges.append(edge)
-        if top_bottom_chamfer_edges:
-            body = body.newObject(top_bottom_chamfer_edges).chamfer(tb_chamfer)
+                if _bbox_on_x_boundary(edge_bbox) and _bbox_on_y_boundary(edge_bbox):
+                    side_chamfer_edges.append(edge)
+            if side_chamfer_edges:
+                result = result.newObject(side_chamfer_edges).chamfer(side_chamfer)
+
+        # Apply top_bottom_chamfer late, keeping it on the exterior perimeter only.
+        if tb_chamfer > 0:
+            top_bottom_chamfer_edges = []
+            for face_selector in (">Z", "<Z"):
+                for edge in result.faces(face_selector).wires().toPending().edges().vals():
+                    edge_bbox = edge.BoundingBox()
+                    if (
+                        _near(edge_bbox.xmin, body_x_min)
+                        or _near(edge_bbox.xmax, body_x_max)
+                        or _near(edge_bbox.ymin, body_y_min)
+                        or _near(edge_bbox.ymax, body_y_max)
+                    ):
+                        top_bottom_chamfer_edges.append(edge)
+            if top_bottom_chamfer_edges:
+                result = result.newObject(top_bottom_chamfer_edges).chamfer(tb_chamfer)
+
+        return result
+
+    unrounded_body = body
+    edge_rounding_error: Exception | None = None
+    for candidate_radius in _edge_rounding_candidates(fillet_radius):
+        try:
+            rounded_body = _apply_fingerbox_rounding(unrounded_body, candidate_radius)
+            body = _apply_outer_chamfers(rounded_body)
+            if candidate_radius < fillet_radius:
+                warning_messages.append(
+                    f"edge_rounding too large for the current fingerbox and chamfer geometry. "
+                    f"Clamped to {candidate_radius:.2f} mm so the model can be created."
+                )
+            break
+        except Exception as exc:
+            edge_rounding_error = exc
+    else:
+        if edge_rounding_error is not None:
+            raise edge_rounding_error
 
     body_bbox = body.val().BoundingBox()
     rope_cut_clearance = 2.0
 
-    # Single rope hole at the center of the ridge.
-    hole_z = (body_bbox.zmin + body_bbox.zmax) / 2.0
     cord_hole_groove_cut_radius = safe_cord_hole_diameter / 2.0
+    hole_z, cord_hole_placement_warnings = _cord_hole_stair_center_z(
+        params.bottom_layer_thickness,
+        params.edge_depth,
+        board_height,
+        safe_cord_hole_diameter,
+    )
+    warning_messages.extend(cord_hole_placement_warnings)
+
+    # Single rope hole at the center of the stairs.
     center_hole_center_x = (body_bbox.xmin + body_bbox.xmax) / 2.0
     center_hole_half_length = (
         ((body_bbox.xmax - body_bbox.xmin) / 2.0)
