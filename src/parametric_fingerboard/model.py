@@ -29,6 +29,7 @@ Coordinate system:
 """
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
@@ -38,7 +39,16 @@ from cadquery import exporters
 
 FINGER_ORDER = ("index", "middle", "ring", "pinky")
 CORD_HOLE_TOP_LAYER_CLEARANCE = 2.0
+MIN_EFFECTIVE_CHAMFER = 0.001
+# OCCT fails the second chamfer when the side bevel is too small to meet the
+# top/bottom bevel at the corner. This is the observed geometric threshold.
+SIDE_TOP_CHAMFER_MIN_RATIO = 2.0 - math.sqrt(2.0)
+CHAMFER_INTERSECTION_CLEARANCE = 0.0001
 ExportType = Literal["STL", "STEP", "AMF", "SVG", "TJS", "DXF", "VRML", "VTP", "3MF", "BREP", "BIN"]
+
+
+def _format_chamfer_mm(value: float) -> str:
+    return f"{value:.4f}".rstrip("0").rstrip(".")
 
 
 @dataclass(slots=True)
@@ -519,6 +529,45 @@ def build_fingerboard(
             f"top/bottom chamfer too large and would cut into the fingerbox. "
             f"Clamped to {max_tb_chamfer:.2f} mm (tolerance {tb_tolerance:.2f} mm)."
         )
+    if 0.0 < tb_chamfer < MIN_EFFECTIVE_CHAMFER:
+        if max_tb_chamfer >= MIN_EFFECTIVE_CHAMFER:
+            tb_chamfer = MIN_EFFECTIVE_CHAMFER
+            warning_messages.append(
+                f"top/bottom chamfer too small for the CAD kernel. "
+                f"Clamped to {_format_chamfer_mm(tb_chamfer)} mm so the model can be created."
+            )
+        else:
+            tb_chamfer = 0.0
+            warning_messages.append(
+                f"top/bottom chamfer too small for the CAD kernel, and no positive top/bottom "
+                f"chamfer fits the current margins. Clamped to 0.00 mm."
+            )
+
+    if side_chamfer > 0.0:
+        min_side_chamfer = MIN_EFFECTIVE_CHAMFER
+        min_side_chamfer_reason = "CAD kernel"
+        if tb_chamfer > 0.0:
+            min_side_for_top_bottom = (
+                (tb_chamfer * SIDE_TOP_CHAMFER_MIN_RATIO)
+                + CHAMFER_INTERSECTION_CLEARANCE
+            )
+            if min_side_for_top_bottom > min_side_chamfer:
+                min_side_chamfer = min_side_for_top_bottom
+                min_side_chamfer_reason = "active top/bottom chamfer"
+
+        if side_chamfer < min_side_chamfer:
+            if min_side_chamfer <= max_side_chamfer:
+                side_chamfer = min_side_chamfer
+                warning_messages.append(
+                    f"side_chamfer too small for the {min_side_chamfer_reason}. "
+                    f"Clamped to {_format_chamfer_mm(side_chamfer)} mm so the model can be created."
+                )
+            else:
+                side_chamfer = 0.0
+                warning_messages.append(
+                    f"side_chamfer too small for the {min_side_chamfer_reason}, and no positive "
+                    f"side chamfer fits the current margins. Clamped to 0.00 mm."
+                )
 
     safe_center_bulk, safe_cord_hole_diameter, bulk_cord_warnings = _sanitize_center_bulk_and_cord(
         params.center_bulk,
