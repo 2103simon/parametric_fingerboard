@@ -767,6 +767,7 @@ def build_fingerboard(
     fillet_radius, edge_rounding_warnings = _sanitize_edge_rounding(params.edge_rounding, params.top_margin)  # TODO sanitize fillet radius. Must be < params.top_margin
     warning_messages.extend(edge_rounding_warnings)
     fingerbox_rounding_regions: list[tuple[float, float, float, float]] = []
+    smooth_relief_rounding_regions: list[tuple[float, float, float, float]] = []
 
     # UI mapping: "Left Hand" controls left visual side and "Right Hand" right side.
     # Finger slot order is index -> middle -> ring -> pinky for both sides. The
@@ -808,6 +809,13 @@ def build_fingerboard(
             (x, side_sign * (inner_wall_abs + relief_offset))
             for x, relief_offset in relief_profile
         ]
+        for (x_1, y_1), (x_2, y_2) in zip(inner_boundary, inner_boundary[1:]):
+            smooth_relief_rounding_regions.append((
+                min(x_1, x_2),
+                max(x_1, x_2),
+                min(y_1, y_2),
+                max(y_1, y_2),
+            ))
         pocket_outline: list[tuple[float, float]] = []
         for point in [*outer_boundary, *reversed(inner_boundary)]:
             _append_distinct_point(pocket_outline, point)
@@ -915,22 +923,38 @@ def build_fingerboard(
 
         rounding_tolerance = 1e-4
         fingerbox_rounding_edges = []
+
+        def _edge_matches_region(edge_bbox, edge_center, region: tuple[float, float, float, float]) -> bool:
+            x_min, x_max, y_min, y_max = region
+            bbox_in_region = (
+                edge_bbox.xmin >= x_min - rounding_tolerance
+                and edge_bbox.xmax <= x_max + rounding_tolerance
+                and edge_bbox.ymin >= y_min - rounding_tolerance
+                and edge_bbox.ymax <= y_max + rounding_tolerance
+            )
+            center_in_region = (
+                x_min - rounding_tolerance <= edge_center.x <= x_max + rounding_tolerance
+                and y_min - rounding_tolerance <= edge_center.y <= y_max + rounding_tolerance
+            )
+            return bbox_in_region or center_in_region
+
+        def _append_rounding_edge(edge) -> None:
+            if not any(edge is existing for existing in fingerbox_rounding_edges):
+                fingerbox_rounding_edges.append(edge)
+
         for edge in source_body.edges("%Circle and >Z").vals():
             edge_bbox = edge.BoundingBox()
             edge_center = edge.Center()
-            for x_min, x_max, y_min, y_max in fingerbox_rounding_regions:
-                bbox_in_region = (
-                    edge_bbox.xmin >= x_min - rounding_tolerance
-                    and edge_bbox.xmax <= x_max + rounding_tolerance
-                    and edge_bbox.ymin >= y_min - rounding_tolerance
-                    and edge_bbox.ymax <= y_max + rounding_tolerance
-                )
-                center_in_region = (
-                    x_min - rounding_tolerance <= edge_center.x <= x_max + rounding_tolerance
-                    and y_min - rounding_tolerance <= edge_center.y <= y_max + rounding_tolerance
-                )
-                if bbox_in_region or center_in_region:
-                    fingerbox_rounding_edges.append(edge)
+            for region in fingerbox_rounding_regions:
+                if _edge_matches_region(edge_bbox, edge_center, region):
+                    _append_rounding_edge(edge)
+                    break
+        for edge in source_body.edges(">Z").vals():
+            edge_bbox = edge.BoundingBox()
+            edge_center = edge.Center()
+            for region in smooth_relief_rounding_regions:
+                if _edge_matches_region(edge_bbox, edge_center, region):
+                    _append_rounding_edge(edge)
                     break
         if not fingerbox_rounding_edges:
             return source_body
