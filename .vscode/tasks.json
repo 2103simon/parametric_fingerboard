@@ -4,11 +4,17 @@
     {
       "label": "Run Parametric Fingerboard App",
       "type": "shell",
-      "command": "/home/smullercleve/.virtualenvs/parametric_fingerboard/bin/python",
+      "command": "/home/smullercleve/virtualenvs/poetry/parametric-fingerboard-1ozGpRwQ-py3.14/bin/python",
       "args": [
         "-m",
         "parametric_fingerboard.app"
       ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PYTHONPATH": "${workspaceFolder}/src"
+        }
+      },
       "group": {
         "kind": "build",
         "isDefault": true
@@ -28,6 +34,12 @@
         "-m",
         "parametric_fingerboard.app"
       ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PYTHONPATH": "${workspaceFolder}/src"
+        }
+      },
       "group": {
         "kind": "build",
         "isDefault": true
