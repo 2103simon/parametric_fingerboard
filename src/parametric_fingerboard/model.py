@@ -32,7 +32,7 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal, TypeVar
 
 import cadquery as cq
 from cadquery import exporters
@@ -46,6 +46,51 @@ FINGER_GROOVE_MAX_FACTOR = 10.0
 SIDE_TOP_CHAMFER_MIN_RATIO = 2.0 - math.sqrt(2.0)
 CHAMFER_INTERSECTION_CLEARANCE = 0.0001
 ExportType = Literal["STL", "STEP", "AMF", "SVG", "TJS", "DXF", "VRML", "VTP", "3MF", "BREP", "BIN"]
+FilletResult = TypeVar("FilletResult")
+
+
+def _find_valid_fillet_radius(
+    requested_radius: float,
+    attempt: Callable[[float], FilletResult],
+    *,
+    radius_tolerance: float = 0.01,
+) -> tuple[float, FilletResult]:
+    """Returns a nearby validated fillet result at or below the requested radius."""
+    try:
+        return requested_radius, attempt(requested_radius)
+    except Exception as requested_radius_error:
+        invalid_radius = requested_radius
+        valid_radius: float | None = None
+        valid_result: FilletResult | None = None
+        fillet_error = requested_radius_error
+        for fraction in (0.9, 0.75, 0.5, 0.25, 0.0):
+            candidate_radius = requested_radius * fraction
+            try:
+                candidate_result = attempt(candidate_radius)
+            except Exception as exc:
+                invalid_radius = candidate_radius
+                fillet_error = exc
+                continue
+            valid_radius = candidate_radius
+            valid_result = candidate_result
+            break
+
+        if valid_radius is None or valid_result is None:
+            raise fillet_error
+
+        for _ in range(8):
+            if invalid_radius - valid_radius <= radius_tolerance:
+                break
+            candidate_radius = (invalid_radius + valid_radius) / 2.0
+            try:
+                candidate_result = attempt(candidate_radius)
+            except Exception:
+                invalid_radius = candidate_radius
+            else:
+                valid_radius = candidate_radius
+                valid_result = candidate_result
+
+        return valid_radius, valid_result
 
 
 def _format_chamfer_mm(value: float) -> str:
@@ -721,27 +766,6 @@ def build_fingerboard(
             or (_near(bbox.ymin, body_y_max) and _near(bbox.ymax, body_y_max))
         )
 
-    def _edge_rounding_candidates(requested_radius: float) -> list[float]:
-        """Returns fallback radii for fragile CadQuery fillets."""
-        if requested_radius <= 0:
-            return [0.0]
-
-        conservative_limits = [
-            requested_radius,
-            params.edge_depth * 0.85,
-            max(0.0, params.top_margin - finger_groove_penetration) * 0.5,
-            finger_groove_penetration * 0.75,
-            finger_groove_penetration * 0.5,
-            0.5,
-            0.0,
-        ]
-        candidates: list[float] = []
-        for limit in conservative_limits:
-            candidate = max(0.0, min(requested_radius, limit))
-            if not any(abs(candidate - existing) < 1e-9 for existing in candidates):
-                candidates.append(candidate)
-        return candidates
-
     def _apply_fingerbox_rounding(source_body: cq.Workplane, radius: float) -> cq.Workplane:
         # Add a small fillet to the inner edge of each fingerbox for comfort. The
         # stored regions keep this from catching unrelated circular edges.
@@ -803,22 +827,26 @@ def build_fingerboard(
         return result
 
     unrounded_body = body
-    edge_rounding_error: Exception | None = None
-    for candidate_radius in _edge_rounding_candidates(fillet_radius):
-        try:
-            rounded_body = _apply_fingerbox_rounding(unrounded_body, candidate_radius)
-            body = _apply_outer_chamfers(rounded_body)
-            if candidate_radius < fillet_radius:
-                warning_messages.append(
-                    f"edge_rounding too large for the current fingerbox and chamfer geometry. "
-                    f"Clamped to {candidate_radius:.2f} mm so the model can be created."
-                )
-            break
-        except Exception as exc:
-            edge_rounding_error = exc
-    else:
-        if edge_rounding_error is not None:
-            raise edge_rounding_error
+
+    def _try_edge_rounding(radius: float) -> cq.Workplane:
+        rounded_body = _apply_fingerbox_rounding(unrounded_body, radius)
+        candidate_body = _apply_outer_chamfers(rounded_body)
+        candidate_shape = candidate_body.val()
+        if not candidate_shape.isValid() or len(candidate_shape.Solids()) != 1:
+            raise ValueError(
+                "edge rounding produced an invalid or disconnected solid"
+            )
+        return candidate_body
+
+    actual_fillet_radius, body = _find_valid_fillet_radius(
+        fillet_radius,
+        _try_edge_rounding,
+    )
+    if actual_fillet_radius < fillet_radius:
+        warning_messages.append(
+            f"edge_rounding too large for the current fingerbox and chamfer geometry. "
+            f"Clamped to {actual_fillet_radius:.2f} mm so the model can be created."
+        )
 
     body_bbox = body.val().BoundingBox()
     rope_cut_clearance = 2.0
