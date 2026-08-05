@@ -40,6 +40,7 @@ from cadquery import exporters
 FINGER_ORDER = ("index", "middle", "ring", "pinky")
 CORD_HOLE_TOP_LAYER_CLEARANCE = 2.0
 MIN_EFFECTIVE_CHAMFER = 0.001
+CUTTER_OVERTRAVEL = 0.25
 FINGER_GROOVE_MAX_FACTOR = 10.0
 # OCCT fails the second chamfer when the side bevel is too small to meet the
 # top/bottom bevel at the corner. This is the observed geometric threshold.
@@ -804,7 +805,6 @@ def build_fingerboard(
             )
             _append_distinct_point(outer_boundary, (x_min, outer_y))
             _append_distinct_point(outer_boundary, (x_max, outer_y))
-
         inner_boundary = [
             (x, side_sign * (inner_wall_abs + relief_offset))
             for x, relief_offset in relief_profile
@@ -820,12 +820,12 @@ def build_fingerboard(
         for point in [*outer_boundary, *reversed(inner_boundary)]:
             _append_distinct_point(pocket_outline, point)
         pocket_height = params.edge_depth
-        z_center = params.bottom_layer_thickness + pocket_height / 2.0
+        pocket_cut_height = pocket_height + CUTTER_OVERTRAVEL
         pocket = (
             cq.Workplane("XY")
             .polyline(pocket_outline)
             .close()
-            .extrude(pocket_height)
+            .extrude(pocket_cut_height)
             .translate((0.0, 0.0, params.bottom_layer_thickness))
         )
         body = body.cut(pocket)
@@ -835,20 +835,28 @@ def build_fingerboard(
                 # Sattle for the fingers to rest on the stairs.
                 groove_y = side_sign * (inner_wall_abs + pocket_depth - finger_groove_offset)
                 groove_depth = params.edge_depth
+                groove_cut_depth = groove_depth + CUTTER_OVERTRAVEL
+                groove_cut_center_z = params.bottom_layer_thickness + (groove_cut_depth / 2.0)
 
                 # Cylindrical groove cutter
                 cutter = (
                     cq.Workplane("XY")
                     .center(cx, groove_y)
                     .circle(safe_finger_groove_cut_radius)
-                    .extrude(groove_depth / 2.0, both=True)
-                    .translate((0.0, 0.0, z_center))
+                    .extrude(groove_cut_depth / 2.0, both=True)
+                    .translate((0.0, 0.0, groove_cut_center_z))
                 )
 
                 # limiting box to only cut stairs
                 groove_width = slot_width
                 groove_length = 2 * finger_groove_penetration  # local region only
                 box_y = side_sign * (inner_wall_abs + pocket_depth)
+                fingerbox_rounding_regions.append((
+                    cx - (groove_width / 2.0),
+                    cx + (groove_width / 2.0),
+                    min(box_y - (groove_length / 2.0), box_y + (groove_length / 2.0)),
+                    max(box_y - (groove_length / 2.0), box_y + (groove_length / 2.0)),
+                ))
                 # Limit region with a box
                 limit_box = (
                     cq.Workplane("XY")
@@ -856,18 +864,11 @@ def build_fingerboard(
                     .box(
                         groove_width,
                         groove_length,
-                        groove_depth,
+                        groove_cut_depth,
                         centered=(True, True, True)
                     )
-                    .translate((0, 0, z_center))
+                    .translate((0, 0, groove_cut_center_z))
                 )
-                fingerbox_rounding_regions.append((
-                    cx - (groove_width / 2.0),
-                    cx + (groove_width / 2.0),
-                    min(box_y - (groove_length / 2.0), box_y + (groove_length / 2.0)),
-                    max(box_y - (groove_length / 2.0), box_y + (groove_length / 2.0)),
-                ))
-
                 # Keep only intersecting region
                 sattle = cutter.intersect(limit_box)
 
@@ -996,7 +997,13 @@ def build_fingerboard(
     for candidate_radius in _edge_rounding_candidates(fillet_radius):
         try:
             rounded_body = _apply_fingerbox_rounding(unrounded_body, candidate_radius)
-            body = _apply_outer_chamfers(rounded_body)
+            candidate_body = _apply_outer_chamfers(rounded_body)
+            candidate_shape = candidate_body.val()
+            if not candidate_shape.isValid() or len(candidate_shape.Solids()) != 1:
+                raise ValueError(
+                    "edge rounding produced an invalid or disconnected solid"
+                )
+            body = candidate_body
             if candidate_radius < fillet_radius:
                 warning_messages.append(
                     f"edge_rounding too large for the current fingerbox and chamfer geometry. "
