@@ -50,7 +50,7 @@ class WatertightBaselineTests(unittest.TestCase):
         self.assertLess(actual_radius, 1.0)
         self.assertEqual(result, actual_radius)
 
-    def test_asymmetric_stairs_fall_back_to_watertight_fillet(self) -> None:
+    def test_asymmetric_stairs_keep_requested_staged_fillet(self) -> None:
         params = FingerboardParameters(
             left=SideParameters(2.0, 3.0, 4.0),
             right=SideParameters(1.0, 4.0, 3.0),
@@ -59,20 +59,30 @@ class WatertightBaselineTests(unittest.TestCase):
         body, warning = build_fingerboard(params)
         face_types = Counter(face.geomType() for face in body.val().Faces())
 
-        self.assertIsNotNone(warning)
-        self.assertIn("Clamped to 0.98 mm", warning)
+        self.assertIsNone(warning)
         self.assertGreaterEqual(face_types["TORUS"], 8)
         self.assertWatertight(body.val())
 
-    def test_tiny_stair_deltas_never_return_an_open_mesh(self) -> None:
+    def test_tiny_stair_deltas_keep_large_staged_fillet(self) -> None:
         params = FingerboardParameters(
             left=SideParameters(0.25, 0.5, 0.75),
             right=SideParameters(0.5, 0.25, 0.75),
-            edge_rounding=0.5,
+            edge_rounding=2.0,
         )
         body, warning = build_fingerboard(params)
 
-        self.assertIsNotNone(warning)
+        self.assertIsNone(warning)
+        self.assertWatertight(body.val())
+
+    def test_equal_depth_groups_keep_large_staged_fillet(self) -> None:
+        params = FingerboardParameters(
+            left=SideParameters(2.0, 0.0, 2.0),
+            right=SideParameters(2.0, 0.0, 2.0),
+            edge_rounding=2.0,
+        )
+        body, warning = build_fingerboard(params)
+
+        self.assertIsNone(warning)
         self.assertWatertight(body.val())
 
 

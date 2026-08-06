@@ -919,7 +919,7 @@ def build_fingerboard(
     
     fillet_radius, edge_rounding_warnings = _sanitize_edge_rounding(params.edge_rounding, params.top_margin)  # TODO sanitize fillet radius. Must be < params.top_margin
     warning_messages.extend(edge_rounding_warnings)
-    fingerbox_rounding_regions: list[tuple[float, float, float, float]] = []
+    finger_saddle_rounding_targets: list[tuple[float, float, float]] = []
 
     left_relative_heights = [
         depth - min(prepared.left_finger_depths)
@@ -1040,11 +1040,10 @@ def build_fingerboard(
                     )
                     .translate((0, 0, z_center))
                 )
-                fingerbox_rounding_regions.append((
-                    cx - (groove_width / 2.0),
-                    cx + (groove_width / 2.0),
-                    min(box_y - (groove_length / 2.0), box_y + (groove_length / 2.0)),
-                    max(box_y - (groove_length / 2.0), box_y + (groove_length / 2.0)),
+                finger_saddle_rounding_targets.append((
+                    pocket_depth,
+                    cx,
+                    groove_y,
                 ))
 
                 # Keep only intersecting region
@@ -1074,33 +1073,68 @@ def build_fingerboard(
         )
 
     def _apply_fingerbox_rounding(source_body: cq.Workplane, radius: float) -> cq.Workplane:
-        # Round both the existing outer finger saddles and the new interpolated
-        # center-facing contours. Geometric matching keeps unrelated top edges
-        # out of the fillet operation.
+        # Round outward saddle edges deepest-to-shallowest. Creating every
+        # saddle fillet in one OCCT operation makes neighboring fillets compete
+        # across small stair offsets; committing each equal-depth group first
+        # lets the next group trim against an already-valid rounded solid.
         if radius <= 0:
             return source_body
 
         rounding_tolerance = 1e-4
-        fingerbox_rounding_edges = []
-        for edge in source_body.edges("%Circle and >Z").vals():
-            edge_bbox = edge.BoundingBox()
-            edge_center = edge.Center()
-            for x_min, x_max, y_min, y_max in fingerbox_rounding_regions:
-                bbox_in_region = (
-                    edge_bbox.xmin >= x_min - rounding_tolerance
-                    and edge_bbox.xmax <= x_max + rounding_tolerance
-                    and edge_bbox.ymin >= y_min - rounding_tolerance
-                    and edge_bbox.ymax <= y_max + rounding_tolerance
+        result = source_body
+        depth_groups: list[list[tuple[float, float, float]]] = []
+        for target in sorted(
+            finger_saddle_rounding_targets,
+            key=lambda item: item[0],
+            reverse=True,
+        ):
+            if (
+                not depth_groups
+                or not math.isclose(
+                    target[0],
+                    depth_groups[-1][0][0],
+                    abs_tol=rounding_tolerance,
                 )
-                center_in_region = (
-                    x_min - rounding_tolerance <= edge_center.x <= x_max + rounding_tolerance
-                    and y_min - rounding_tolerance <= edge_center.y <= y_max + rounding_tolerance
-                )
-                if bbox_in_region or center_in_region:
-                    fingerbox_rounding_edges.append(edge)
-                    break
+            ):
+                depth_groups.append([target])
+            else:
+                depth_groups[-1].append(target)
 
-        for edge in source_body.edges().vals():
+        for target_group in depth_groups:
+            saddle_edges = []
+            for edge in result.edges().vals():
+                edge_bbox = edge.BoundingBox()
+                if (
+                    edge.geomType() != "CIRCLE"
+                    or abs(edge_bbox.zmin - board_height) > rounding_tolerance
+                    or abs(edge_bbox.zmax - board_height) > rounding_tolerance
+                    or not math.isclose(
+                        edge.radius(),
+                        safe_finger_groove_cut_radius,
+                        abs_tol=rounding_tolerance,
+                    )
+                ):
+                    continue
+                arc_center = edge.arcCenter()
+                if any(
+                    abs(arc_center.x - target_x) <= rounding_tolerance
+                    and abs(arc_center.y - target_y) <= rounding_tolerance
+                    for _, target_x, target_y in target_group
+                ):
+                    saddle_edges.append(edge)
+
+            if saddle_edges:
+                result = result.newObject(saddle_edges).fillet(radius)
+                staged_shape = result.val()
+                if not staged_shape.isValid() or len(staged_shape.Solids()) != 1:
+                    raise ValueError(
+                        "staged finger-saddle rounding produced invalid geometry"
+                    )
+
+        # The center contours have ample independent clearance and form one
+        # continuous profile per side, so round them in their own operation.
+        center_contour_edges = []
+        for edge in result.edges().vals():
             edge_bbox = edge.BoundingBox()
             if (
                 abs(edge_bbox.zmin - board_height) > rounding_tolerance
@@ -1116,11 +1150,11 @@ def build_fingerboard(
                     inner_wall_base + _profile_value(profile, point.x)
                 )
                 if abs(point.y - expected_y) <= rounding_tolerance:
-                    fingerbox_rounding_edges.append(edge)
+                    center_contour_edges.append(edge)
                     break
-        if not fingerbox_rounding_edges:
-            return source_body
-        return source_body.newObject(fingerbox_rounding_edges).fillet(radius)
+        if center_contour_edges:
+            result = result.newObject(center_contour_edges).fillet(radius)
+        return result
 
     def _apply_outer_chamfers(source_body: cq.Workplane) -> cq.Workplane:
         result = source_body
