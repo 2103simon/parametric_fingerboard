@@ -35,6 +35,7 @@ from pathlib import Path
 from typing import Callable, Literal, TypeVar
 
 import cadquery as cq
+import trimesh
 from cadquery import exporters
 
 FINGER_ORDER = ("index", "middle", "ring", "pinky")
@@ -47,6 +48,25 @@ SIDE_TOP_CHAMFER_MIN_RATIO = 2.0 - math.sqrt(2.0)
 CHAMFER_INTERSECTION_CLEARANCE = 0.0001
 ExportType = Literal["STL", "STEP", "AMF", "SVG", "TJS", "DXF", "VRML", "VTP", "3MF", "BREP", "BIN"]
 FilletResult = TypeVar("FilletResult")
+
+
+def is_shape_watertight(
+    shape: cq.Workplane | cq.Shape,
+    tolerance: float = 0.15,
+) -> bool:
+    """Return whether the tessellated model forms a closed triangle mesh.
+
+    The default tolerance matches :func:`export_stl`, so the check represents
+    the mesh resolution used for the application's normal exports.
+    """
+    cad_shape = shape.val() if isinstance(shape, cq.Workplane) else shape
+    vertices, triangles = cad_shape.tessellate(tolerance)
+    mesh = trimesh.Trimesh(
+        vertices=[vertex.toTuple() for vertex in vertices],
+        faces=triangles,
+        process=True,
+    )
+    return bool(mesh.is_watertight)
 
 
 def _find_valid_fillet_radius(

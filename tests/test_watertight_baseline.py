@@ -1,6 +1,7 @@
 import unittest
 from collections import Counter
 
+import cadquery as cq
 import trimesh
 
 from parametric_fingerboard.model import (
@@ -8,6 +9,7 @@ from parametric_fingerboard.model import (
     SideParameters,
     _find_valid_fillet_radius,
     build_fingerboard,
+    is_shape_watertight,
 )
 
 
@@ -25,6 +27,13 @@ class WatertightBaselineTests(unittest.TestCase):
         self.assertEqual(len(shape.Shells()), 1)
         self.assertTrue(mesh.is_watertight)
         self.assertTrue(mesh.is_winding_consistent)
+
+    def test_watertight_check_detects_closed_and_open_shapes(self) -> None:
+        closed_shape = cq.Workplane("XY").box(1.0, 1.0, 1.0)
+        open_shape = cq.Face.makePlane(1.0, 1.0)
+
+        self.assertTrue(is_shape_watertight(closed_shape))
+        self.assertFalse(is_shape_watertight(open_shape))
 
     def test_adaptive_search_converges_near_valid_limit(self) -> None:
         def accept_below_one(radius: float) -> float:

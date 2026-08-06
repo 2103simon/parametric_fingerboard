@@ -3,6 +3,7 @@ Name: parametric-fingerboard
 Version: 0.1.0
 Summary: Desktop GUI for generating parametric fingerboard STL models with independent left/right parameters
 Requires-Python: >=3.10
+License-File: LICENSE
 Requires-Dist: cadquery>=2.5
 Requires-Dist: numpy>=2.2.6
 Requires-Dist: PyOpenGL>=3.1.10
@@ -10,3 +11,4 @@ Requires-Dist: PyOpenGL_accelerate>=3.1.10
 Requires-Dist: pyqtgraph>=0.14.0
 Requires-Dist: PyQt6>=6.11.0
 Requires-Dist: trimesh>=4.12.2
+Dynamic: license-file

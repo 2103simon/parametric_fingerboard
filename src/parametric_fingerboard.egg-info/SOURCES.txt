@@ -1,3 +1,5 @@
+LICENSE
+README.md
 pyproject.toml
 src/parametric_fingerboard/__init__.py
 src/parametric_fingerboard/app.py
@@ -10,3 +12,4 @@ src/parametric_fingerboard.egg-info/requires.txt
 src/parametric_fingerboard.egg-info/top_level.txt
 src/parametric_fingerboard/gui/__init__.py
 src/parametric_fingerboard/gui/main_window.py
+tests/test_watertight_baseline.py

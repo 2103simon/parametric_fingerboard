@@ -26,6 +26,12 @@ from parametric_fingerboard.model import (
     build_fingerboard,
     _prepare_fingerboard,
     export_stl,
+    is_shape_watertight,
+)
+
+NOT_WATERTIGHT_WARNING = (
+    "The resulting model is not watertight. The exported model may contain "
+    "open edges and may not print correctly."
 )
 
 GLOBAL_PARAMETER_ROWS = (
@@ -332,6 +338,13 @@ class FingerboardGUI(QMainWindow):
             self.warning_label.clear()
             self.warning_label.hide()
 
+    def _add_model_integrity_warning(self, shape, warning: str | None) -> str | None:
+        if is_shape_watertight(shape):
+            return warning
+        if warning:
+            return f"{warning}\n{NOT_WATERTIGHT_WARNING}"
+        return NOT_WATERTIGHT_WARNING
+
     def _apply_clamped_values_from_warning(self, warning: str) -> None:
         def _set_if_changed(entry: QLineEdit | None, new_value: str) -> None:
             if entry is None:
@@ -510,6 +523,7 @@ class FingerboardGUI(QMainWindow):
                 prepared=prepared,
                 bulk_cord_preference=bulk_cord_preference,
             )
+            warning = self._add_model_integrity_warning(shape, warning)
             # Swap length and width for output
             board_width, board_length, board_height = (
                 prepared.board_length,
@@ -529,7 +543,12 @@ class FingerboardGUI(QMainWindow):
                 self._apply_clamped_values_from_warning(warning)
                 self._set_warning_text(warning)
                 if show_dialog:
-                    QMessageBox.warning(self, "Parameters Adjusted", warning)
+                    title = (
+                        "Model Integrity Warning"
+                        if NOT_WATERTIGHT_WARNING in warning
+                        else "Parameters Adjusted"
+                    )
+                    QMessageBox.warning(self, title, warning)
             else:
                 self._set_warning_text("")
         except Exception as exc:
@@ -623,6 +642,7 @@ class FingerboardGUI(QMainWindow):
                 prepared=prepared,
                 bulk_cord_preference=bulk_cord_preference,
             )
+            warning = self._add_model_integrity_warning(shape, warning)
             output = export_stl(
                 params,
                 target_path,
@@ -638,7 +658,12 @@ class FingerboardGUI(QMainWindow):
             if warning:
                 self._apply_clamped_values_from_warning(warning)
                 self._set_warning_text(warning)
-                QMessageBox.warning(self, "Parameters Adjusted", warning)
+                title = (
+                    "Model Integrity Warning"
+                    if NOT_WATERTIGHT_WARNING in warning
+                    else "Parameters Adjusted"
+                )
+                QMessageBox.warning(self, title, warning)
             else:
                 self._set_warning_text("")
         except Exception as exc:
