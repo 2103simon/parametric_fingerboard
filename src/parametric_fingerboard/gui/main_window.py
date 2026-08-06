@@ -85,7 +85,9 @@ PARAMETER_TOOLTIPS = {
     ),
     "center_bulk": (
         "<b>Center bulk</b><br>"
-        "Width of the solid central ridge between the left and right hand pockets.<br>"
+        "Minimum width of the solid central ridge between the interpolated "
+        "left and right fingerbox walls.<br>"
+        "Changing it shifts the two center-facing contours apart or together.<br>"
         "The cord hole must fit with clearance:<br>"
         "<i>d</i><sub>cord</sub> &le; <i>b</i><sub>center</sub> - 2 mm."
     ),

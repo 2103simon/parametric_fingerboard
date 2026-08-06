@@ -29,6 +29,7 @@ Measure the height difference as a positive value only, then enter that positive
 ## Features
 - Interactive PyQt6 GUI with live 3D preview
 - Parametric geometry with independent left/right finger-depth deltas
+- Mirrored, shape-preserving interpolation of each outer finger stair onto the opposite center-facing wall
 - Global + advanced controls (margins, chamfers, center bulk, cord hole, edge depth)
 - Safety clamping with user-visible warnings for invalid geometry combinations
 - Export support for multiple CAD/mesh formats
