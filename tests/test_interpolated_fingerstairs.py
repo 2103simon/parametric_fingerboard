@@ -4,6 +4,7 @@ from collections import Counter
 from parametric_fingerboard.model import (
     FingerboardParameters,
     SideParameters,
+    _finger_depth_offsets,
     _finger_depths,
     _minimum_profile_sum,
     _monotone_finger_profile,
@@ -14,6 +15,24 @@ from parametric_fingerboard.model import (
 
 
 class InterpolatedFingerstairsTests(unittest.TestCase):
+    def test_interpolation_offsets_use_the_stair_delta_chain_and_baseline(self) -> None:
+        hand_span = 80.0
+        side = SideParameters(
+            index_middle=-12.0,
+            middle_ring=-3.0,
+            ring_pinky=-4.0,
+        )
+
+        # Pinky starts at plateau zero, then ring=4, middle=7 and index=-5.
+        # Shifting the plateaus makes index zero without changing their
+        # differences.  Converting plateaus to stair depths gives these
+        # offsets from the hand_span / 2 baseline.
+        expected_offsets = [12.0, 0.0, 3.0, 7.0]
+        expected_depths = [40.0 + offset for offset in expected_offsets]
+
+        self.assertEqual(_finger_depth_offsets(side), expected_offsets)
+        self.assertEqual(_finger_depths(hand_span, side), expected_depths)
+
     def test_profile_mirrors_fingers_and_repeats_boundary_values(self) -> None:
         profile = _monotone_finger_profile(
             80.0,

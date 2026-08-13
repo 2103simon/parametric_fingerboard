@@ -265,9 +265,20 @@ def _finger_depths(hand_span: float, side: SideParameters) -> list[float]:
         list[float]: List of depths for [index, middle, ring, pinky].
     """
     base = hand_span / 2.0
+    return [base + offset for offset in _finger_depth_offsets(side)]
+
+
+def _finger_depth_offsets(side: SideParameters) -> list[float]:
+    """Return each stair depth relative to the common finger-depth baseline.
+
+    This is the variable part of :func:`_finger_depths`.  Keeping it separate
+    lets the outward stairs and the interpolated center edges use the exact
+    same cumulative-delta logic without trying to recover the baseline from
+    already prepared depths.
+    """
     plateaus = _plateaus(side)
     max_plateau = max(plateaus)
-    return [base + (max_plateau - p) for p in plateaus]
+    return [max_plateau - plateau for plateau in plateaus]
 
 
 def _monotone_finger_profile(
@@ -921,14 +932,13 @@ def build_fingerboard(
     warning_messages.extend(edge_rounding_warnings)
     finger_saddle_rounding_targets: list[tuple[float, float, float]] = []
 
-    left_relative_heights = [
-        depth - min(prepared.left_finger_depths)
-        for depth in prepared.left_finger_depths
-    ]
-    right_relative_heights = [
-        depth - min(prepared.right_finger_depths)
-        for depth in prepared.right_finger_depths
-    ]
+    # Use the same cumulative deltas as the outward stair cuts.  Their common
+    # baseline is hand_span / 2 (see _finger_depths); the center contour needs
+    # only the offsets from that baseline.  Do not infer it from min(depths),
+    # because the interpolation points should be defined by the input deltas,
+    # not by a normalized derivative of prepared geometry.
+    left_relative_heights = _finger_depth_offsets(params.left)
+    right_relative_heights = _finger_depth_offsets(params.right)
     # Each center-facing wall repeats the opposite outward stair in mirrored X
     # order, allowing the same hand to meet the corresponding shape.
     left_center_profile = _monotone_finger_profile(
