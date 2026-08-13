@@ -41,6 +41,7 @@ from cadquery import exporters
 FINGER_ORDER = ("index", "middle", "ring", "pinky")
 CORD_HOLE_TOP_LAYER_CLEARANCE = 2.0
 MIN_EFFECTIVE_CHAMFER = 0.001
+CUTTER_OVERTRAVEL = 0.25
 FINGER_GROOVE_MAX_FACTOR = 10.0
 # OCCT fails the second chamfer when the side bevel is too small to meet the
 # top/bottom bevel at the corner. This is the observed geometric threshold.
@@ -542,6 +543,145 @@ def _fingerbox_cut(
     return cq.Workplane("XY").newObject([solid]).translate((0.0, 0.0, bottom_z))
 
 
+def _normalized_plateau_offsets(side: SideParameters) -> list[float]:
+    """
+    Returns the user-delta-derived stair heights normalized to start at zero.
+
+    These values are the parametric source for the smoothed inner pocket relief:
+    they come from the same deltas that create the stepped outer pocket depths,
+    instead of being inferred from generated geometry.
+    """
+    plateaus = _plateaus(side)
+    min_plateau = min(plateaus)
+    return [p - min_plateau for p in plateaus]
+
+
+def _clamped_cubic_spline_coefficients(
+    xs: list[float],
+    ys: list[float],
+    start_slope: float,
+    end_slope: float,
+) -> list[tuple[float, float, float, float]]:
+    """
+    Computes piecewise cubic coefficients for an interpolating clamped spline.
+
+    The returned tuples are (a, b, c, d), evaluated as:
+        a + b * dx + c * dx**2 + d * dx**3
+    where dx = x - xs[i] for each interval i.
+    """
+    if len(xs) != len(ys):
+        raise ValueError("xs and ys must contain the same number of values")
+    if len(xs) < 2:
+        raise ValueError("at least two spline points are required")
+    if any(next_x <= x for x, next_x in zip(xs, xs[1:])):
+        raise ValueError("spline x values must be strictly increasing")
+
+    n = len(xs) - 1
+    h = [xs[i + 1] - xs[i] for i in range(n)]
+    alpha = [0.0] * (n + 1)
+    alpha[0] = 3.0 * ((ys[1] - ys[0]) / h[0] - start_slope)
+    alpha[n] = 3.0 * (end_slope - (ys[n] - ys[n - 1]) / h[n - 1])
+    for i in range(1, n):
+        alpha[i] = (
+            (3.0 / h[i]) * (ys[i + 1] - ys[i])
+            - (3.0 / h[i - 1]) * (ys[i] - ys[i - 1])
+        )
+
+    lower = [0.0] * (n + 1)
+    mu = [0.0] * (n + 1)
+    z = [0.0] * (n + 1)
+    lower[0] = 2.0 * h[0]
+    mu[0] = 0.5
+    z[0] = alpha[0] / lower[0]
+
+    for i in range(1, n):
+        lower[i] = 2.0 * (xs[i + 1] - xs[i - 1]) - h[i - 1] * mu[i - 1]
+        mu[i] = h[i] / lower[i]
+        z[i] = (alpha[i] - h[i - 1] * z[i - 1]) / lower[i]
+
+    lower[n] = h[n - 1] * (2.0 - mu[n - 1])
+    z[n] = (alpha[n] - h[n - 1] * z[n - 1]) / lower[n]
+
+    a = ys[:]
+    b = [0.0] * n
+    c = [0.0] * (n + 1)
+    d = [0.0] * n
+    c[n] = z[n]
+    for j in range(n - 1, -1, -1):
+        c[j] = z[j] - mu[j] * c[j + 1]
+        b[j] = (a[j + 1] - a[j]) / h[j] - h[j] * (c[j + 1] + 2.0 * c[j]) / 3.0
+        d[j] = (c[j + 1] - c[j]) / (3.0 * h[j])
+
+    return [(a[i], b[i], c[i], d[i]) for i in range(n)]
+
+
+def _sample_clamped_cubic_profile(
+    xs: list[float],
+    ys: list[float],
+    *,
+    samples_per_interval: int = 10,
+) -> list[tuple[float, float]]:
+    """
+    Samples a clamped cubic interpolating spline with zero endpoint slope.
+
+    Zero slope at the first and last x positions makes the profile reach the
+    fingerbox end planes orthogonally.
+    """
+    coefficients = _clamped_cubic_spline_coefficients(xs, ys, 0.0, 0.0)
+    samples: list[tuple[float, float]] = []
+    samples_per_interval = max(1, samples_per_interval)
+
+    for i, (a, b, c, d) in enumerate(coefficients):
+        interval_samples = samples_per_interval
+        for step in range(interval_samples + 1):
+            if samples and step == 0:
+                continue
+            t = step / interval_samples
+            x = xs[i] + (xs[i + 1] - xs[i]) * t
+            dx = x - xs[i]
+            y = a + (b * dx) + (c * dx * dx) + (d * dx * dx * dx)
+            samples.append((x, y))
+
+    return samples
+
+
+def _smooth_relief_profile(
+    hand_span: float,
+    slot_width: float,
+    source_side: SideParameters,
+) -> tuple[list[tuple[float, float]], float]:
+    """
+    Builds the opposite-pocket inner relief profile from source stair heights.
+
+    The profile contains boundary points at the fingerbox ends and one exact
+    interpolation point at the center of each finger stair.
+    """
+    left_edge = -0.5 * hand_span
+    right_edge = 0.5 * hand_span
+    center_xs = [left_edge + (i + 0.5) * slot_width for i in range(len(FINGER_ORDER))]
+    stair_offsets = _normalized_plateau_offsets(source_side)
+
+    xs = [left_edge, *center_xs, right_edge]
+    ys = [stair_offsets[0], *stair_offsets, stair_offsets[-1]]
+    profile = _sample_clamped_cubic_profile(xs, ys)
+    return profile, max(stair_offsets)
+
+
+def _append_distinct_point(
+    points: list[tuple[float, float]],
+    point: tuple[float, float],
+    *,
+    tolerance: float = 1e-9,
+) -> None:
+    """Appends a 2D point unless it would create a zero-length edge."""
+    if points:
+        previous_x, previous_y = points[-1]
+        point_x, point_y = point
+        if abs(previous_x - point_x) <= tolerance and abs(previous_y - point_y) <= tolerance:
+            return
+    points.append(point)
+
+
 def _sanitize_center_bulk_and_cord(
     center_bulk: float,
     cord_hole_diameter: float,
@@ -756,6 +896,8 @@ def _prepare_fingerboard(
     right_finger_depths = _finger_depths(params.hand_span, params.right)
     left_max_depth = max(left_finger_depths)
     right_max_depth = max(right_finger_depths)
+    left_smooth_relief_gain = max(_normalized_plateau_offsets(params.right))
+    right_smooth_relief_gain = max(_normalized_plateau_offsets(params.left))
     # board height is bottom_layer_thickness + user edge_depth
     board_height = params.bottom_layer_thickness + params.edge_depth
 
@@ -770,11 +912,13 @@ def _prepare_fingerboard(
     left_required_reach = (
         (safe_center_bulk / 2.0)
         + left_max_depth
+        + left_smooth_relief_gain
         + params.top_margin
     )
     right_required_reach = (
         (safe_center_bulk / 2.0)
         + right_max_depth
+        + right_smooth_relief_gain
         + params.top_margin
     )
     required_scaled_width = (
@@ -1025,10 +1169,12 @@ def build_fingerboard(
                 )
 
     # UI mapping: "Left Hand" controls left visual side and "Right Hand" right side.
-    # Finger slot order is index -> middle -> ring -> pinky for both sides.
-    for side_sign, _, finger_depths in (
-        (-1.0, params.right, prepared.right_finger_depths),
-        (1.0, params.left, prepared.left_finger_depths),
+    # Finger slot order is index -> middle -> ring -> pinky for both sides. The
+    # smooth inner wall copies the opposite hand side without reversing order:
+    # left pocket left edge -> right pocket left edge, and vice versa.
+    for side_sign, _, finger_depths, opposite_side in (
+        (-1.0, params.right, prepared.right_finger_depths, params.left),
+        (1.0, params.left, prepared.left_finger_depths, params.right),
     ):
         # The fingerbox region is exactly hand_span wide, centered on the board
         centers_x = [left_edge + (i + 0.5) * slot_width for i in range(n_slots)]
@@ -1052,14 +1198,16 @@ def build_fingerboard(
                 # Sattle for the fingers to rest on the stairs.
                 groove_y = side_sign * (outer_wall_base + pocket_depth - finger_groove_offset)
                 groove_depth = params.edge_depth
+                groove_cut_depth = groove_depth + CUTTER_OVERTRAVEL
+                groove_cut_center_z = params.bottom_layer_thickness + (groove_cut_depth / 2.0)
 
                 # Cylindrical groove cutter
                 cutter = (
                     cq.Workplane("XY")
                     .center(cx, groove_y)
                     .circle(safe_finger_groove_cut_radius)
-                    .extrude(groove_depth / 2.0, both=True)
-                    .translate((0.0, 0.0, z_center))
+                    .extrude(groove_cut_depth / 2.0, both=True)
+                    .translate((0.0, 0.0, groove_cut_center_z))
                 )
 
                 # limiting box to only cut stairs
@@ -1073,10 +1221,10 @@ def build_fingerboard(
                     .box(
                         groove_width,
                         groove_length,
-                        groove_depth,
+                        groove_cut_depth,
                         centered=(True, True, True)
                     )
-                    .translate((0, 0, z_center))
+                    .translate((0, 0, groove_cut_center_z))
                 )
                 finger_saddle_rounding_targets.append((
                     pocket_depth,

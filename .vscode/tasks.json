@@ -9,6 +9,12 @@
         "-m",
         "parametric_fingerboard.app"
       ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PYTHONPATH": "${workspaceFolder}/src"
+        }
+      },
       "group": {
         "kind": "build",
         "isDefault": true
@@ -28,6 +34,12 @@
         "-m",
         "parametric_fingerboard.app"
       ],
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "env": {
+          "PYTHONPATH": "${workspaceFolder}/src"
+        }
+      },
       "group": {
         "kind": "build",
         "isDefault": true
