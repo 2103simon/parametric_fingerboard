@@ -32,9 +32,10 @@ from __future__ import annotations
 import math
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Callable, Literal, TypeVar
 
 import cadquery as cq
+import trimesh
 from cadquery import exporters
 
 FINGER_ORDER = ("index", "middle", "ring", "pinky")
@@ -47,6 +48,70 @@ FINGER_GROOVE_MAX_FACTOR = 10.0
 SIDE_TOP_CHAMFER_MIN_RATIO = 2.0 - math.sqrt(2.0)
 CHAMFER_INTERSECTION_CLEARANCE = 0.0001
 ExportType = Literal["STL", "STEP", "AMF", "SVG", "TJS", "DXF", "VRML", "VTP", "3MF", "BREP", "BIN"]
+FilletResult = TypeVar("FilletResult")
+
+
+def is_shape_watertight(
+    shape: cq.Workplane | cq.Shape,
+    tolerance: float = 0.15,
+) -> bool:
+    """Return whether the tessellated model forms a closed triangle mesh.
+
+    The default tolerance matches :func:`export_stl`, so the check represents
+    the mesh resolution used for the application's normal exports.
+    """
+    cad_shape = shape.val() if isinstance(shape, cq.Workplane) else shape
+    vertices, triangles = cad_shape.tessellate(tolerance)
+    mesh = trimesh.Trimesh(
+        vertices=[vertex.toTuple() for vertex in vertices],
+        faces=triangles,
+        process=True,
+    )
+    return bool(mesh.is_watertight)
+
+
+def _find_valid_fillet_radius(
+    requested_radius: float,
+    attempt: Callable[[float], FilletResult],
+    *,
+    radius_tolerance: float = 0.01,
+) -> tuple[float, FilletResult]:
+    """Returns a nearby validated fillet result at or below the requested radius."""
+    try:
+        return requested_radius, attempt(requested_radius)
+    except Exception as requested_radius_error:
+        invalid_radius = requested_radius
+        valid_radius: float | None = None
+        valid_result: FilletResult | None = None
+        fillet_error = requested_radius_error
+        for fraction in (0.9, 0.75, 0.5, 0.25, 0.0):
+            candidate_radius = requested_radius * fraction
+            try:
+                candidate_result = attempt(candidate_radius)
+            except Exception as exc:
+                invalid_radius = candidate_radius
+                fillet_error = exc
+                continue
+            valid_radius = candidate_radius
+            valid_result = candidate_result
+            break
+
+        if valid_radius is None or valid_result is None:
+            raise fillet_error
+
+        for _ in range(8):
+            if invalid_radius - valid_radius <= radius_tolerance:
+                break
+            candidate_radius = (invalid_radius + valid_radius) / 2.0
+            try:
+                candidate_result = attempt(candidate_radius)
+            except Exception:
+                invalid_radius = candidate_radius
+            else:
+                valid_radius = candidate_radius
+                valid_result = candidate_result
+
+        return valid_radius, valid_result
 
 
 def _format_chamfer_mm(value: float) -> str:
@@ -129,6 +194,15 @@ class PreparedFingerboard:
     right_finger_depths: list[float]
 
 
+@dataclass(frozen=True, slots=True)
+class _MonotoneProfile:
+    """Piecewise-cubic, shape-preserving interpolation data."""
+
+    x: tuple[float, ...]
+    y: tuple[float, ...]
+    slopes: tuple[float, ...]
+
+
 def _plateaus(side: SideParameters) -> list[float]:
     """
     Computes the cumulative finger plateau heights for a hand side.
@@ -192,9 +266,281 @@ def _finger_depths(hand_span: float, side: SideParameters) -> list[float]:
         list[float]: List of depths for [index, middle, ring, pinky].
     """
     base = hand_span / 2.0
+    return [base + offset for offset in _finger_depth_offsets(side)]
+
+
+def _finger_depth_offsets(side: SideParameters) -> list[float]:
+    """Return each stair depth relative to the common finger-depth baseline.
+
+    This is the variable part of :func:`_finger_depths`.  Keeping it separate
+    lets the outward stairs and the interpolated center edges use the exact
+    same cumulative-delta logic without trying to recover the baseline from
+    already prepared depths.
+    """
     plateaus = _plateaus(side)
     max_plateau = max(plateaus)
-    return [base + (max_plateau - p) for p in plateaus]
+    return [max_plateau - plateau for plateau in plateaus]
+
+
+def _monotone_finger_profile(
+    hand_span: float,
+    stair_heights: list[float],
+    *,
+    mirrored: bool = False,
+) -> _MonotoneProfile:
+    """Interpolate four finger-center heights without overshoot.
+
+    The first and last finger values are repeated at the fingerbox boundaries.
+    PCHIP/Fritsch-Carlson slopes make the curve shape-preserving and give it a
+    horizontal tangent across each boundary-to-nearest-center interval.
+    """
+    if hand_span <= 0.0:
+        raise ValueError("hand_span must be > 0 mm")
+    if len(stair_heights) != len(FINGER_ORDER):
+        raise ValueError("exactly four stair heights are required")
+    if not all(math.isfinite(value) for value in stair_heights):
+        raise ValueError("stair heights must be finite")
+
+    heights = list(reversed(stair_heights)) if mirrored else list(stair_heights)
+    slot_width = hand_span / len(FINGER_ORDER)
+    left_edge = -hand_span / 2.0
+    centers = [
+        left_edge + ((index + 0.5) * slot_width)
+        for index in range(len(FINGER_ORDER))
+    ]
+    x = [left_edge, *centers, -left_edge]
+    y = [heights[0], *heights, heights[-1]]
+    intervals = [x[index + 1] - x[index] for index in range(len(x) - 1)]
+    secants = [
+        (y[index + 1] - y[index]) / intervals[index]
+        for index in range(len(intervals))
+    ]
+
+    slopes = [0.0] * len(x)
+    for index in range(1, len(x) - 1):
+        previous = secants[index - 1]
+        following = secants[index]
+        if previous == 0.0 or following == 0.0 or previous * following < 0.0:
+            slopes[index] = 0.0
+            continue
+        previous_interval = intervals[index - 1]
+        following_interval = intervals[index]
+        weight_1 = (2.0 * following_interval) + previous_interval
+        weight_2 = following_interval + (2.0 * previous_interval)
+        slopes[index] = (weight_1 + weight_2) / (
+            (weight_1 / previous) + (weight_2 / following)
+        )
+
+    # The repeated endpoint values make the first and last secants zero. Keep
+    # the boundary slopes explicit so their flat behavior is not implementation
+    # dependent if this helper is changed later.
+    slopes[0] = 0.0
+    slopes[-1] = 0.0
+    return _MonotoneProfile(tuple(x), tuple(y), tuple(slopes))
+
+
+def _stair_heights_from_depths(stair_depths: list[float]) -> list[float]:
+    """Convert outward pocket depths to physical stair heights.
+
+    A deeper pocket produces a shorter stair, so interpolation height is the
+    inverse of cut depth.  Normalizing the deepest cut to zero preserves every
+    height difference while removing the common finger-depth baseline.
+    """
+    if len(stair_depths) != len(FINGER_ORDER):
+        raise ValueError("exactly four stair depths are required")
+    if not all(math.isfinite(value) for value in stair_depths):
+        raise ValueError("stair depths must be finite")
+    deepest_stair = max(stair_depths)
+    return [deepest_stair - depth for depth in stair_depths]
+
+
+def _center_profiles_from_stairs(
+    hand_span: float,
+    left_stair_depths: list[float],
+    right_stair_depths: list[float],
+) -> tuple[_MonotoneProfile, _MonotoneProfile]:
+    """Copy each outer stair shape to the opposite bulk wall and smooth it.
+
+    Reflection across the board's Y centerline does not change X, so the
+    index-to-pinky order is preserved. Pocket depth is converted to physical
+    height first so the highest stair remains the highest interpolation point.
+    """
+    left_stair_heights = _stair_heights_from_depths(left_stair_depths)
+    right_stair_heights = _stair_heights_from_depths(right_stair_depths)
+    left_center_profile = _monotone_finger_profile(
+        hand_span,
+        right_stair_heights,
+    )
+    right_center_profile = _monotone_finger_profile(
+        hand_span,
+        left_stair_heights,
+    )
+    return left_center_profile, right_center_profile
+
+
+def _profile_interval_coefficients(
+    profile: _MonotoneProfile,
+    index: int,
+) -> tuple[float, float, float, float]:
+    """Return ``a, b, c, d`` for one interval evaluated as a cubic in t."""
+    y_0 = profile.y[index]
+    y_1 = profile.y[index + 1]
+    interval = profile.x[index + 1] - profile.x[index]
+    slope_0 = profile.slopes[index]
+    slope_1 = profile.slopes[index + 1]
+    return (
+        (2.0 * y_0) - (2.0 * y_1) + interval * (slope_0 + slope_1),
+        (-3.0 * y_0) + (3.0 * y_1) - interval * ((2.0 * slope_0) + slope_1),
+        interval * slope_0,
+        y_0,
+    )
+
+
+def _profile_value(profile: _MonotoneProfile, x: float) -> float:
+    """Evaluate a finger profile, clamping x to its boundary values."""
+    if x <= profile.x[0]:
+        return profile.y[0]
+    if x >= profile.x[-1]:
+        return profile.y[-1]
+    interval_index = len(profile.x) - 2
+    for index in range(len(profile.x) - 1):
+        if x <= profile.x[index + 1]:
+            interval_index = index
+            break
+    interval = profile.x[interval_index + 1] - profile.x[interval_index]
+    t = (x - profile.x[interval_index]) / interval
+    a, b, c, d = _profile_interval_coefficients(profile, interval_index)
+    return (((a * t) + b) * t + c) * t + d
+
+
+def _minimum_profile_sum(
+    first: _MonotoneProfile,
+    second: _MonotoneProfile,
+) -> float:
+    """Find the exact minimum separation contribution of two aligned profiles."""
+    if first.x != second.x:
+        raise ValueError("profiles must use the same interpolation positions")
+
+    minimum = math.inf
+    for index in range(len(first.x) - 1):
+        first_coefficients = _profile_interval_coefficients(first, index)
+        second_coefficients = _profile_interval_coefficients(second, index)
+        a, b, c, d = tuple(
+            left + right
+            for left, right in zip(first_coefficients, second_coefficients)
+        )
+        candidates = [0.0, 1.0]
+        discriminant = (2.0 * b) ** 2 - (4.0 * 3.0 * a * c)
+        if abs(a) <= 1e-12:
+            if abs(b) > 1e-12:
+                candidates.append(-c / (2.0 * b))
+        elif discriminant >= 0.0:
+            root = math.sqrt(discriminant)
+            candidates.extend((
+                ((-2.0 * b) - root) / (6.0 * a),
+                ((-2.0 * b) + root) / (6.0 * a),
+            ))
+        for t in candidates:
+            if 0.0 <= t <= 1.0:
+                value = (((a * t) + b) * t + c) * t + d
+                minimum = min(minimum, value)
+    return minimum
+
+
+def _profile_bezier_edges(
+    profile: _MonotoneProfile,
+    side_sign: float,
+    wall_base: float,
+) -> list[cq.Edge]:
+    """Create exact cubic Bézier edges for a monotone center-wall profile."""
+    edges: list[cq.Edge] = []
+    for index in range(len(profile.x) - 1):
+        x_0 = profile.x[index]
+        x_1 = profile.x[index + 1]
+        interval = x_1 - x_0
+        y_0 = wall_base + profile.y[index]
+        y_1 = wall_base + profile.y[index + 1]
+        control_points = [
+            cq.Vector(x_0, side_sign * y_0, 0.0),
+            cq.Vector(
+                x_0 + (interval / 3.0),
+                side_sign * (y_0 + (profile.slopes[index] * interval / 3.0)),
+                0.0,
+            ),
+            cq.Vector(
+                x_1 - (interval / 3.0),
+                side_sign * (y_1 - (profile.slopes[index + 1] * interval / 3.0)),
+                0.0,
+            ),
+            cq.Vector(x_1, side_sign * y_1, 0.0),
+        ]
+        edges.append(cq.Edge.makeBezier(control_points))
+    return edges
+
+
+def _fingerbox_cut(
+    profile: _MonotoneProfile,
+    side_sign: float,
+    wall_base: float,
+    outer_base: float,
+    outer_depths: list[float],
+    outer_recess: float,
+    bottom_z: float,
+    height: float,
+) -> cq.Workplane:
+    """Build one pocket cut with a curved inner wall and stepped outer wall."""
+    if len(outer_depths) != len(FINGER_ORDER):
+        raise ValueError("exactly four outer finger depths are required")
+
+    inner_edges = _profile_bezier_edges(profile, side_sign, wall_base)
+    left_edge = profile.x[0]
+    right_edge = profile.x[-1]
+    slot_width = (right_edge - left_edge) / len(FINGER_ORDER)
+
+    def outer_y(depth: float) -> float:
+        return side_sign * (outer_base + depth - outer_recess)
+
+    edges = list(inner_edges)
+    last_outer_y = outer_y(outer_depths[-1])
+    edges.append(
+        cq.Edge.makeLine(
+            cq.Vector(right_edge, side_sign * (wall_base + profile.y[-1]), 0.0),
+            cq.Vector(right_edge, last_outer_y, 0.0),
+        )
+    )
+
+    current_x = right_edge
+    current_y = last_outer_y
+    for index in range(len(outer_depths) - 1, -1, -1):
+        next_x = left_edge + (index * slot_width)
+        edges.append(
+            cq.Edge.makeLine(
+                cq.Vector(current_x, current_y, 0.0),
+                cq.Vector(next_x, current_y, 0.0),
+            )
+        )
+        current_x = next_x
+        if index > 0:
+            next_y = outer_y(outer_depths[index - 1])
+            if not math.isclose(current_y, next_y, abs_tol=1e-12):
+                edges.append(
+                    cq.Edge.makeLine(
+                        cq.Vector(current_x, current_y, 0.0),
+                        cq.Vector(current_x, next_y, 0.0),
+                    )
+                )
+            current_y = next_y
+
+    edges.append(
+        cq.Edge.makeLine(
+            cq.Vector(left_edge, current_y, 0.0),
+            cq.Vector(left_edge, side_sign * (wall_base + profile.y[0]), 0.0),
+        )
+    )
+    wire = cq.Wire.assembleEdges(edges)
+    face = cq.Face.makeFromWires(wire)
+    solid = cq.Solid.extrudeLinear(face, cq.Vector(0.0, 0.0, height))
+    return cq.Workplane("XY").newObject([solid]).translate((0.0, 0.0, bottom_z))
 
 
 def _normalized_plateau_offsets(side: SideParameters) -> list[float]:
@@ -767,8 +1113,60 @@ def build_fingerboard(
     
     fillet_radius, edge_rounding_warnings = _sanitize_edge_rounding(params.edge_rounding, params.top_margin)  # TODO sanitize fillet radius. Must be < params.top_margin
     warning_messages.extend(edge_rounding_warnings)
-    fingerbox_rounding_regions: list[tuple[float, float, float, float]] = []
-    smooth_relief_rounding_regions: list[tuple[float, float, float, float]] = []
+    finger_saddle_rounding_targets: list[tuple[float, float, float]] = []
+
+    # Copy each outer staircase onto the opposite center-facing wall. Convert
+    # cut depths to physical heights first: the shallowest cut is the highest
+    # stair. Reflection across Y preserves the index-to-pinky X order.
+    left_center_profile, right_center_profile = _center_profiles_from_stairs(
+        params.hand_span,
+        prepared.left_finger_depths,
+        prepared.right_finger_depths,
+    )
+    minimum_profile_separation = _minimum_profile_sum(
+        left_center_profile,
+        right_center_profile,
+    )
+    inner_wall_base = (safe_center_bulk / 2.0) - (
+        minimum_profile_separation / 2.0
+    )
+    outer_wall_base = safe_center_bulk / 2.0
+
+    profile_by_side = {
+        -1.0: right_center_profile,
+        1.0: left_center_profile,
+    }
+
+    # Reject combinations where the transferred contour would consume an
+    # entire finger pocket. Normal parameter ranges retain ample clearance, but
+    # independent hands can otherwise create an impossible self-intersection.
+    left_edge = -0.5 * params.hand_span
+    for side_name, profile, finger_depths in (
+        ("right", right_center_profile, prepared.right_finger_depths),
+        ("left", left_center_profile, prepared.left_finger_depths),
+    ):
+        for slot_index, pocket_depth in enumerate(finger_depths):
+            slot_min_x = left_edge + (slot_index * slot_width)
+            slot_max_x = slot_min_x + slot_width
+            profile_values = [
+                _profile_value(profile, slot_min_x),
+                _profile_value(profile, slot_max_x),
+                *(
+                    value
+                    for x, value in zip(profile.x, profile.y)
+                    if slot_min_x < x < slot_max_x
+                ),
+            ]
+            available_depth = (
+                pocket_depth
+                - finger_groove_penetration
+                + (minimum_profile_separation / 2.0)
+            )
+            if max(profile_values) >= available_depth:
+                raise ValueError(
+                    f"{side_name} interpolated center contour intersects its outward "
+                    f"finger stair in the {FINGER_ORDER[slot_index]} slot"
+                )
 
     # UI mapping: "Left Hand" controls left visual side and "Right Hand" right side.
     # Finger slot order is index -> middle -> ring -> pinky for both sides. The
@@ -779,61 +1177,26 @@ def build_fingerboard(
         (1.0, params.left, prepared.left_finger_depths, params.right),
     ):
         # The fingerbox region is exactly hand_span wide, centered on the board
-        left_edge = -0.5 * params.hand_span
         centers_x = [left_edge + (i + 0.5) * slot_width for i in range(n_slots)]
 
-        # Center-facing pocket wall: only center_bulk applies, not margin.
-        inner_wall_abs = safe_center_bulk / 2.0
-        relief_profile, pocket_space_gain = _smooth_relief_profile(
-            params.hand_span,
-            slot_width,
-            opposite_side,
-        )
-        effective_finger_depths = [
-            finger_depth + pocket_space_gain
-            for finger_depth in finger_depths
-        ]
-
-        outer_boundary: list[tuple[float, float]] = []
-        for slot_index, pocket_depth in enumerate(effective_finger_depths):
-            x_min = left_edge + slot_index * slot_width
-            x_max = x_min + slot_width
-            outer_y = side_sign * (
-                inner_wall_abs
-                + pocket_depth
-                - finger_groove_penetration
-            )
-            _append_distinct_point(outer_boundary, (x_min, outer_y))
-            _append_distinct_point(outer_boundary, (x_max, outer_y))
-        inner_boundary = [
-            (x, side_sign * (inner_wall_abs + relief_offset))
-            for x, relief_offset in relief_profile
-        ]
-        for (x_1, y_1), (x_2, y_2) in zip(inner_boundary, inner_boundary[1:]):
-            smooth_relief_rounding_regions.append((
-                min(x_1, x_2),
-                max(x_1, x_2),
-                min(y_1, y_2),
-                max(y_1, y_2),
-            ))
-        pocket_outline: list[tuple[float, float]] = []
-        for point in [*outer_boundary, *reversed(inner_boundary)]:
-            _append_distinct_point(pocket_outline, point)
         pocket_height = params.edge_depth
-        pocket_cut_height = pocket_height + CUTTER_OVERTRAVEL
-        pocket = (
-            cq.Workplane("XY")
-            .polyline(pocket_outline)
-            .close()
-            .extrude(pocket_cut_height)
-            .translate((0.0, 0.0, params.bottom_layer_thickness))
+        z_center = params.bottom_layer_thickness + pocket_height / 2.0
+        pocket = _fingerbox_cut(
+            profile_by_side[side_sign],
+            side_sign,
+            inner_wall_base,
+            outer_wall_base,
+            finger_depths,
+            finger_groove_penetration,
+            params.bottom_layer_thickness,
+            pocket_height,
         )
         body = body.cut(pocket)
 
-        if finger_groove_enabled:
-            for cx, pocket_depth in zip(centers_x, effective_finger_depths):
+        for cx, pocket_depth in zip(centers_x, finger_depths):
+            if finger_groove_enabled:
                 # Sattle for the fingers to rest on the stairs.
-                groove_y = side_sign * (inner_wall_abs + pocket_depth - finger_groove_offset)
+                groove_y = side_sign * (outer_wall_base + pocket_depth - finger_groove_offset)
                 groove_depth = params.edge_depth
                 groove_cut_depth = groove_depth + CUTTER_OVERTRAVEL
                 groove_cut_center_z = params.bottom_layer_thickness + (groove_cut_depth / 2.0)
@@ -850,13 +1213,7 @@ def build_fingerboard(
                 # limiting box to only cut stairs
                 groove_width = slot_width
                 groove_length = 2 * finger_groove_penetration  # local region only
-                box_y = side_sign * (inner_wall_abs + pocket_depth)
-                fingerbox_rounding_regions.append((
-                    cx - (groove_width / 2.0),
-                    cx + (groove_width / 2.0),
-                    min(box_y - (groove_length / 2.0), box_y + (groove_length / 2.0)),
-                    max(box_y - (groove_length / 2.0), box_y + (groove_length / 2.0)),
-                ))
+                box_y = side_sign * (outer_wall_base + pocket_depth)
                 # Limit region with a box
                 limit_box = (
                     cq.Workplane("XY")
@@ -869,6 +1226,12 @@ def build_fingerboard(
                     )
                     .translate((0, 0, groove_cut_center_z))
                 )
+                finger_saddle_rounding_targets.append((
+                    pocket_depth,
+                    cx,
+                    groove_y,
+                ))
+
                 # Keep only intersecting region
                 sattle = cutter.intersect(limit_box)
 
@@ -895,71 +1258,89 @@ def build_fingerboard(
             or (_near(bbox.ymin, body_y_max) and _near(bbox.ymax, body_y_max))
         )
 
-    def _edge_rounding_candidates(requested_radius: float) -> list[float]:
-        """Returns fallback radii for fragile CadQuery fillets."""
-        if requested_radius <= 0:
-            return [0.0]
-
-        conservative_limits = [
-            requested_radius,
-            params.edge_depth * 0.85,
-            max(0.0, params.top_margin - finger_groove_penetration) * 0.5,
-            finger_groove_penetration * 0.75,
-            finger_groove_penetration * 0.5,
-            0.5,
-            0.0,
-        ]
-        candidates: list[float] = []
-        for limit in conservative_limits:
-            candidate = max(0.0, min(requested_radius, limit))
-            if not any(abs(candidate - existing) < 1e-9 for existing in candidates):
-                candidates.append(candidate)
-        return candidates
-
     def _apply_fingerbox_rounding(source_body: cq.Workplane, radius: float) -> cq.Workplane:
-        # Add a small fillet to the inner edge of each fingerbox for comfort. The
-        # stored regions keep this from catching unrelated circular edges.
+        # Round outward saddle edges deepest-to-shallowest. Creating every
+        # saddle fillet in one OCCT operation makes neighboring fillets compete
+        # across small stair offsets; committing each equal-depth group first
+        # lets the next group trim against an already-valid rounded solid.
         if radius <= 0:
             return source_body
 
         rounding_tolerance = 1e-4
-        fingerbox_rounding_edges = []
+        result = source_body
+        depth_groups: list[list[tuple[float, float, float]]] = []
+        for target in sorted(
+            finger_saddle_rounding_targets,
+            key=lambda item: item[0],
+            reverse=True,
+        ):
+            if (
+                not depth_groups
+                or not math.isclose(
+                    target[0],
+                    depth_groups[-1][0][0],
+                    abs_tol=rounding_tolerance,
+                )
+            ):
+                depth_groups.append([target])
+            else:
+                depth_groups[-1].append(target)
 
-        def _edge_matches_region(edge_bbox, edge_center, region: tuple[float, float, float, float]) -> bool:
-            x_min, x_max, y_min, y_max = region
-            bbox_in_region = (
-                edge_bbox.xmin >= x_min - rounding_tolerance
-                and edge_bbox.xmax <= x_max + rounding_tolerance
-                and edge_bbox.ymin >= y_min - rounding_tolerance
-                and edge_bbox.ymax <= y_max + rounding_tolerance
-            )
-            center_in_region = (
-                x_min - rounding_tolerance <= edge_center.x <= x_max + rounding_tolerance
-                and y_min - rounding_tolerance <= edge_center.y <= y_max + rounding_tolerance
-            )
-            return bbox_in_region or center_in_region
+        for target_group in depth_groups:
+            saddle_edges = []
+            for edge in result.edges().vals():
+                edge_bbox = edge.BoundingBox()
+                if (
+                    edge.geomType() != "CIRCLE"
+                    or abs(edge_bbox.zmin - board_height) > rounding_tolerance
+                    or abs(edge_bbox.zmax - board_height) > rounding_tolerance
+                    or not math.isclose(
+                        edge.radius(),
+                        safe_finger_groove_cut_radius,
+                        abs_tol=rounding_tolerance,
+                    )
+                ):
+                    continue
+                arc_center = edge.arcCenter()
+                if any(
+                    abs(arc_center.x - target_x) <= rounding_tolerance
+                    and abs(arc_center.y - target_y) <= rounding_tolerance
+                    for _, target_x, target_y in target_group
+                ):
+                    saddle_edges.append(edge)
 
-        def _append_rounding_edge(edge) -> None:
-            if not any(edge is existing for existing in fingerbox_rounding_edges):
-                fingerbox_rounding_edges.append(edge)
+            if saddle_edges:
+                result = result.newObject(saddle_edges).fillet(radius)
+                staged_shape = result.val()
+                if not staged_shape.isValid() or len(staged_shape.Solids()) != 1:
+                    raise ValueError(
+                        "staged finger-saddle rounding produced invalid geometry"
+                    )
 
-        for edge in source_body.edges("%Circle and >Z").vals():
+        # The center contours have ample independent clearance and form one
+        # continuous profile per side, so round them in their own operation.
+        center_contour_edges = []
+        for edge in result.edges().vals():
             edge_bbox = edge.BoundingBox()
-            edge_center = edge.Center()
-            for region in fingerbox_rounding_regions:
-                if _edge_matches_region(edge_bbox, edge_center, region):
-                    _append_rounding_edge(edge)
+            if (
+                abs(edge_bbox.zmin - board_height) > rounding_tolerance
+                or abs(edge_bbox.zmax - board_height) > rounding_tolerance
+                or edge_bbox.xmax - edge_bbox.xmin <= rounding_tolerance
+                or edge_bbox.xmin < left_edge - rounding_tolerance
+                or edge_bbox.xmax > -left_edge + rounding_tolerance
+            ):
+                continue
+            point = edge.positionAt(0.5)
+            for side_sign, profile in profile_by_side.items():
+                expected_y = side_sign * (
+                    inner_wall_base + _profile_value(profile, point.x)
+                )
+                if abs(point.y - expected_y) <= rounding_tolerance:
+                    center_contour_edges.append(edge)
                     break
-        for edge in source_body.edges(">Z").vals():
-            edge_bbox = edge.BoundingBox()
-            edge_center = edge.Center()
-            for region in smooth_relief_rounding_regions:
-                if _edge_matches_region(edge_bbox, edge_center, region):
-                    _append_rounding_edge(edge)
-                    break
-        if not fingerbox_rounding_edges:
-            return source_body
-        return source_body.newObject(fingerbox_rounding_edges).fillet(radius)
+        if center_contour_edges:
+            result = result.newObject(center_contour_edges).fillet(radius)
+        return result
 
     def _apply_outer_chamfers(source_body: cq.Workplane) -> cq.Workplane:
         result = source_body
@@ -993,28 +1374,26 @@ def build_fingerboard(
         return result
 
     unrounded_body = body
-    edge_rounding_error: Exception | None = None
-    for candidate_radius in _edge_rounding_candidates(fillet_radius):
-        try:
-            rounded_body = _apply_fingerbox_rounding(unrounded_body, candidate_radius)
-            candidate_body = _apply_outer_chamfers(rounded_body)
-            candidate_shape = candidate_body.val()
-            if not candidate_shape.isValid() or len(candidate_shape.Solids()) != 1:
-                raise ValueError(
-                    "edge rounding produced an invalid or disconnected solid"
-                )
-            body = candidate_body
-            if candidate_radius < fillet_radius:
-                warning_messages.append(
-                    f"edge_rounding too large for the current fingerbox and chamfer geometry. "
-                    f"Clamped to {candidate_radius:.2f} mm so the model can be created."
-                )
-            break
-        except Exception as exc:
-            edge_rounding_error = exc
-    else:
-        if edge_rounding_error is not None:
-            raise edge_rounding_error
+
+    def _try_edge_rounding(radius: float) -> cq.Workplane:
+        rounded_body = _apply_fingerbox_rounding(unrounded_body, radius)
+        candidate_body = _apply_outer_chamfers(rounded_body)
+        candidate_shape = candidate_body.val()
+        if not candidate_shape.isValid() or len(candidate_shape.Solids()) != 1:
+            raise ValueError(
+                "edge rounding produced an invalid or disconnected solid"
+            )
+        return candidate_body
+
+    actual_fillet_radius, body = _find_valid_fillet_radius(
+        fillet_radius,
+        _try_edge_rounding,
+    )
+    if actual_fillet_radius < fillet_radius:
+        warning_messages.append(
+            f"edge_rounding too large for the current fingerbox and chamfer geometry. "
+            f"Clamped to {actual_fillet_radius:.2f} mm so the model can be created."
+        )
 
     body_bbox = body.val().BoundingBox()
     rope_cut_clearance = 2.0

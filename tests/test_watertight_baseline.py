@@ -1,0 +1,90 @@
+import unittest
+from collections import Counter
+
+import cadquery as cq
+import trimesh
+
+from parametric_fingerboard.model import (
+    FingerboardParameters,
+    SideParameters,
+    _find_valid_fillet_radius,
+    build_fingerboard,
+    is_shape_watertight,
+)
+
+
+class WatertightBaselineTests(unittest.TestCase):
+    def assertWatertight(self, shape) -> None:
+        vertices, triangles = shape.tessellate(0.15)
+        mesh = trimesh.Trimesh(
+            vertices=[vertex.toTuple() for vertex in vertices],
+            faces=triangles,
+            process=True,
+        )
+
+        self.assertTrue(shape.isValid())
+        self.assertEqual(len(shape.Solids()), 1)
+        self.assertEqual(len(shape.Shells()), 1)
+        self.assertTrue(mesh.is_watertight)
+        self.assertTrue(mesh.is_winding_consistent)
+
+    def test_watertight_check_detects_closed_and_open_shapes(self) -> None:
+        closed_shape = cq.Workplane("XY").box(1.0, 1.0, 1.0)
+        open_shape = cq.Face.makePlane(1.0, 1.0)
+
+        self.assertTrue(is_shape_watertight(closed_shape))
+        self.assertFalse(is_shape_watertight(open_shape))
+
+    def test_adaptive_search_converges_near_valid_limit(self) -> None:
+        def accept_below_one(radius: float) -> float:
+            if radius >= 1.0:
+                raise ValueError("invalid test radius")
+            return radius
+
+        actual_radius, result = _find_valid_fillet_radius(
+            2.0,
+            accept_below_one,
+        )
+
+        self.assertGreater(actual_radius, 0.98)
+        self.assertLess(actual_radius, 1.0)
+        self.assertEqual(result, actual_radius)
+
+    def test_asymmetric_stairs_keep_requested_staged_fillet(self) -> None:
+        params = FingerboardParameters(
+            left=SideParameters(2.0, 3.0, 4.0),
+            right=SideParameters(1.0, 4.0, 3.0),
+            edge_rounding=2.0,
+        )
+        body, warning = build_fingerboard(params)
+        face_types = Counter(face.geomType() for face in body.val().Faces())
+
+        self.assertIsNone(warning)
+        self.assertGreaterEqual(face_types["TORUS"], 8)
+        self.assertWatertight(body.val())
+
+    def test_tiny_stair_deltas_keep_large_staged_fillet(self) -> None:
+        params = FingerboardParameters(
+            left=SideParameters(0.25, 0.5, 0.75),
+            right=SideParameters(0.5, 0.25, 0.75),
+            edge_rounding=2.0,
+        )
+        body, warning = build_fingerboard(params)
+
+        self.assertIsNone(warning)
+        self.assertWatertight(body.val())
+
+    def test_equal_depth_groups_keep_large_staged_fillet(self) -> None:
+        params = FingerboardParameters(
+            left=SideParameters(2.0, 0.0, 2.0),
+            right=SideParameters(2.0, 0.0, 2.0),
+            edge_rounding=2.0,
+        )
+        body, warning = build_fingerboard(params)
+
+        self.assertIsNone(warning)
+        self.assertWatertight(body.val())
+
+
+if __name__ == "__main__":
+    unittest.main()
