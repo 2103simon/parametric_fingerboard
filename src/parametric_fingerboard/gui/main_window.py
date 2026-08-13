@@ -12,7 +12,7 @@ from typing import cast, Literal
 import numpy as np
 import trimesh
 from PyQt6.QtWidgets import (
-    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QLabel, QPushButton, QFileDialog, QMessageBox, QGroupBox, QScrollArea, QSizePolicy
+    QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFormLayout, QLineEdit, QLabel, QPushButton, QFileDialog, QMessageBox, QGroupBox, QScrollArea, QSizePolicy, QColorDialog, QDialog
 )
 from PyQt6.QtCore import Qt, QTimer
 import pyqtgraph.opengl as gl
@@ -176,6 +176,11 @@ class FingerboardGUI(QMainWindow):
         self.warning_label.setStyleSheet("color: #8a1f1f; background: #fbeaea; padding: 4px; border-radius: 3px;")
         self.warning_label.hide()
         self._last_edited_global_key: str | None = None
+        self._model_color = QtGui.QColor(128, 128, 128)
+        self._preview_mesh_item = None
+        self._preview_vertices = None
+        self._preview_faces = None
+        self._preview_brightness = None
         self.global_entries = {}
         self.left_entries = {}
         self.right_entries = {}
@@ -268,7 +273,73 @@ class FingerboardGUI(QMainWindow):
         self.gl_view.setBackgroundColor('w')
         self.gl_view.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         preview_layout.addWidget(self.gl_view)
+
+        color_controls = QHBoxLayout()
+        color_controls.addStretch(1)
+        color_controls.addWidget(QLabel("Color"))
+        self.color_button = QPushButton()
+        self.color_button.setFixedSize(30, 30)
+        self.color_button.setToolTip("Choose the model preview color")
+        self.color_button.setAccessibleName("Model color")
+        self.color_button.clicked.connect(self._choose_model_color)
+        color_controls.addWidget(self.color_button)
+        self._update_color_button()
+        preview_layout.addLayout(color_controls)
         main_layout.addWidget(preview_widget, 1)
+
+    def _update_color_button(self) -> None:
+        self.color_button.setStyleSheet(
+            "QPushButton {"
+            f"background-color: {self._model_color.name()};"
+            "border: 1px solid #555; border-radius: 3px;"
+            "}"
+            "QPushButton:hover { border: 2px solid #333; }"
+        )
+
+    def _choose_model_color(self) -> None:
+        previous_color = QtGui.QColor(self._model_color)
+        dialog = QColorDialog(self._model_color, self)
+        dialog.setWindowTitle("Model Color")
+        # Qt's built-in dialog provides hue, saturation, value, and RGB controls.
+        # Keep it non-native so the same full picker is shown on every platform.
+        dialog.setOption(QColorDialog.ColorDialogOption.DontUseNativeDialog, True)
+        dialog.currentColorChanged.connect(self._set_model_color)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            self._set_model_color(previous_color)
+
+    def _set_model_color(self, color: QtGui.QColor) -> None:
+        if not color.isValid():
+            return
+        self._model_color = QtGui.QColor(color)
+        self._update_color_button()
+        self._update_preview_mesh_color()
+
+    def _update_preview_mesh_color(self) -> None:
+        if (
+            self._preview_mesh_item is None
+            or self._preview_vertices is None
+            or self._preview_faces is None
+            or self._preview_brightness is None
+        ):
+            return
+
+        base_color = np.array(
+            [self._model_color.redF(), self._model_color.greenF(), self._model_color.blueF()]
+        )
+        brightness = self._preview_brightness
+        face_colors = np.column_stack(
+            [
+                np.clip(base_color[0] * brightness, 0.0, 1.0),
+                np.clip(base_color[1] * brightness, 0.0, 1.0),
+                np.clip(base_color[2] * brightness, 0.0, 1.0),
+                np.ones_like(brightness),
+            ]
+        )
+        self._preview_mesh_item.setMeshData(
+            vertexes=self._preview_vertices,
+            faces=self._preview_faces,
+            faceColors=face_colors,
+        )
 
     def _toggle_advanced_section(self):
         # No-op: QGroupBox handles show/hide. Just trigger preview update.
@@ -485,8 +556,9 @@ class FingerboardGUI(QMainWindow):
         light_dir /= np.linalg.norm(light_dir)
         brightness = np.clip(normals @ light_dir, 0.0, 1.0)
         brightness = 0.22 + 0.78 * brightness
-        # Set model color to medium gray
-        base_color = np.array([0.5, 0.5, 0.5])
+        base_color = np.array(
+            [self._model_color.redF(), self._model_color.greenF(), self._model_color.blueF()]
+        )
         face_colors = np.column_stack([
             np.clip(base_color[0] * brightness, 0.0, 1.0),
             np.clip(base_color[1] * brightness, 0.0, 1.0),
@@ -497,6 +569,10 @@ class FingerboardGUI(QMainWindow):
         meshdata = gl.MeshData(vertexes=vertices, faces=faces.astype(np.int32), faceColors=face_colors)
         mesh_item = gl.GLMeshItem(meshdata=meshdata, smooth=False, drawFaces=True, drawEdges=False)
         self.gl_view.addItem(mesh_item)
+        self._preview_mesh_item = mesh_item
+        self._preview_vertices = vertices
+        self._preview_faces = faces.astype(np.int32)
+        self._preview_brightness = brightness
         # Center and scale view
         bounds = mesh.bounds
         mins = bounds[0]
