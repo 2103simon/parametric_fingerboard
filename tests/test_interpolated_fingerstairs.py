@@ -4,11 +4,13 @@ from collections import Counter
 from parametric_fingerboard.model import (
     FingerboardParameters,
     SideParameters,
+    _center_profiles_from_stairs,
     _finger_depth_offsets,
     _finger_depths,
     _minimum_profile_sum,
     _monotone_finger_profile,
     _profile_value,
+    _stair_heights_from_depths,
     build_fingerboard,
     is_shape_watertight,
 )
@@ -46,6 +48,34 @@ class InterpolatedFingerstairsTests(unittest.TestCase):
         self.assertEqual(profile.slopes[-2], 0.0)
         self.assertEqual(profile.slopes[-1], 0.0)
 
+    def test_center_profiles_copy_physical_stair_heights_without_inversion(self) -> None:
+        hand_span = 80.0
+        left_stair_depths = [52.0, 40.0, 43.0, 47.0]
+        right_stair_depths = [41.0, 40.0, 44.0, 47.0]
+        left_profile, right_profile = _center_profiles_from_stairs(
+            hand_span,
+            left_stair_depths,
+            right_stair_depths,
+        )
+        finger_centers = (-30.0, -10.0, 10.0, 30.0)
+        left_stair_heights = [0.0, 12.0, 9.0, 5.0]
+        right_stair_heights = [6.0, 7.0, 3.0, 0.0]
+
+        self.assertEqual(
+            [_profile_value(left_profile, x) for x in finger_centers],
+            right_stair_heights,
+        )
+        self.assertEqual(
+            [_profile_value(right_profile, x) for x in finger_centers],
+            left_stair_heights,
+        )
+
+    def test_shortest_cut_is_the_highest_stair(self) -> None:
+        self.assertEqual(
+            _stair_heights_from_depths([52.0, 40.0, 43.0, 47.0]),
+            [0.0, 12.0, 9.0, 5.0],
+        )
+
     def test_profile_does_not_overshoot_any_interval(self) -> None:
         profile = _monotone_finger_profile(
             68.0,
@@ -67,17 +97,10 @@ class InterpolatedFingerstairsTests(unittest.TestCase):
         hand_span = 68.0
         left_depths = _finger_depths(hand_span, SideParameters(2.0, 3.0, 4.0))
         right_depths = _finger_depths(hand_span, SideParameters(1.0, 4.0, 3.0))
-        left_relative = [value - min(left_depths) for value in left_depths]
-        right_relative = [value - min(right_depths) for value in right_depths]
-        left_wall = _monotone_finger_profile(
+        left_wall, right_wall = _center_profiles_from_stairs(
             hand_span,
-            right_relative,
-            mirrored=True,
-        )
-        right_wall = _monotone_finger_profile(
-            hand_span,
-            left_relative,
-            mirrored=True,
+            left_depths,
+            right_depths,
         )
         center_bulk = 15.0
         profile_minimum = _minimum_profile_sum(left_wall, right_wall)

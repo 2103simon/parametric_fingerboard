@@ -283,7 +283,7 @@ def _finger_depth_offsets(side: SideParameters) -> list[float]:
 
 def _monotone_finger_profile(
     hand_span: float,
-    relative_heights: list[float],
+    stair_heights: list[float],
     *,
     mirrored: bool = False,
 ) -> _MonotoneProfile:
@@ -295,12 +295,12 @@ def _monotone_finger_profile(
     """
     if hand_span <= 0.0:
         raise ValueError("hand_span must be > 0 mm")
-    if len(relative_heights) != len(FINGER_ORDER):
-        raise ValueError("exactly four relative finger heights are required")
-    if not all(math.isfinite(value) for value in relative_heights):
-        raise ValueError("relative finger heights must be finite")
+    if len(stair_heights) != len(FINGER_ORDER):
+        raise ValueError("exactly four stair heights are required")
+    if not all(math.isfinite(value) for value in stair_heights):
+        raise ValueError("stair heights must be finite")
 
-    heights = list(reversed(relative_heights)) if mirrored else list(relative_heights)
+    heights = list(reversed(stair_heights)) if mirrored else list(stair_heights)
     slot_width = hand_span / len(FINGER_ORDER)
     left_edge = -hand_span / 2.0
     centers = [
@@ -336,6 +336,45 @@ def _monotone_finger_profile(
     slopes[0] = 0.0
     slopes[-1] = 0.0
     return _MonotoneProfile(tuple(x), tuple(y), tuple(slopes))
+
+
+def _stair_heights_from_depths(stair_depths: list[float]) -> list[float]:
+    """Convert outward pocket depths to physical stair heights.
+
+    A deeper pocket produces a shorter stair, so interpolation height is the
+    inverse of cut depth.  Normalizing the deepest cut to zero preserves every
+    height difference while removing the common finger-depth baseline.
+    """
+    if len(stair_depths) != len(FINGER_ORDER):
+        raise ValueError("exactly four stair depths are required")
+    if not all(math.isfinite(value) for value in stair_depths):
+        raise ValueError("stair depths must be finite")
+    deepest_stair = max(stair_depths)
+    return [deepest_stair - depth for depth in stair_depths]
+
+
+def _center_profiles_from_stairs(
+    hand_span: float,
+    left_stair_depths: list[float],
+    right_stair_depths: list[float],
+) -> tuple[_MonotoneProfile, _MonotoneProfile]:
+    """Copy each outer stair shape to the opposite bulk wall and smooth it.
+
+    Reflection across the board's Y centerline does not change X, so the
+    index-to-pinky order is preserved. Pocket depth is converted to physical
+    height first so the highest stair remains the highest interpolation point.
+    """
+    left_stair_heights = _stair_heights_from_depths(left_stair_depths)
+    right_stair_heights = _stair_heights_from_depths(right_stair_depths)
+    left_center_profile = _monotone_finger_profile(
+        hand_span,
+        right_stair_heights,
+    )
+    right_center_profile = _monotone_finger_profile(
+        hand_span,
+        left_stair_heights,
+    )
+    return left_center_profile, right_center_profile
 
 
 def _profile_interval_coefficients(
@@ -932,24 +971,13 @@ def build_fingerboard(
     warning_messages.extend(edge_rounding_warnings)
     finger_saddle_rounding_targets: list[tuple[float, float, float]] = []
 
-    # Use the same cumulative deltas as the outward stair cuts.  Their common
-    # baseline is hand_span / 2 (see _finger_depths); the center contour needs
-    # only the offsets from that baseline.  Do not infer it from min(depths),
-    # because the interpolation points should be defined by the input deltas,
-    # not by a normalized derivative of prepared geometry.
-    left_relative_heights = _finger_depth_offsets(params.left)
-    right_relative_heights = _finger_depth_offsets(params.right)
-    # Each center-facing wall repeats the opposite outward stair in mirrored X
-    # order, allowing the same hand to meet the corresponding shape.
-    left_center_profile = _monotone_finger_profile(
+    # Copy each outer staircase onto the opposite center-facing wall. Convert
+    # cut depths to physical heights first: the shallowest cut is the highest
+    # stair. Reflection across Y preserves the index-to-pinky X order.
+    left_center_profile, right_center_profile = _center_profiles_from_stairs(
         params.hand_span,
-        right_relative_heights,
-        mirrored=True,
-    )
-    right_center_profile = _monotone_finger_profile(
-        params.hand_span,
-        left_relative_heights,
-        mirrored=True,
+        prepared.left_finger_depths,
+        prepared.right_finger_depths,
     )
     minimum_profile_separation = _minimum_profile_sum(
         left_center_profile,
